@@ -135,7 +135,7 @@ Alarms and error messages are an integral part of any instrument control panel. 
 The alarm widget is created in the activated state
 ```python
 # ICAlarmWidget(alarm_id: int, alarm_message: str, alarm_description: str, led_type: ICLEDType)
-alrm1 = ICAlarmWidget(0, "critical alarm", "This is a critical alarm.", led_type=ICLEDType.AlarmCritical)
+alrm1 = ICAlarmWidget(0, "critical alarm", "This is a critical alarm.", ICLEDType.AlarmCritical)
 ```
 
 ### 5.1 Properties
