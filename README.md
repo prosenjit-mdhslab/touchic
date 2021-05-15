@@ -11,7 +11,7 @@ The screenshot below shows basic buttons and labels. The components and their fu
   <img src="https://raw.githubusercontent.com/prosenjit-mdhslab/touchic/main/doc/Screenshot%20from%202021-05-13%2020-28-54.png"/>
 </p>
 
-## 1. Text Label 
+## 1. Text Label (text_label.py)
 Unlike conventional text labels, the puropose of the text label is to display process parameters. Hence they are designed for display __name__ and __value__ pair. In the image above the __name__ (*Message*) is shown in the top left. The __value__ (*Hello World*) is shown right. The text label is defined in `ICTextLabel` class. A text label can be created by calling its constructor. The class inherits from the `QWidget`.
 ```python
 lbl = ICTextLabel("Message", "Hello World")
@@ -36,7 +36,7 @@ The class exposes several properties to **get** and **set** displayed values, it
 lbl.back_colors = (QtGui.QColor(200, 200, 200), QtGui.QColor(100, 100, 100)) 
 ```
 
-## 2. Clock Label
+## 2. Clock Label (clock_label.py)
 This is used to display the time. The clock label is defined by `ICClockLabel`. The class inherits `ICTextLabel`. The `.value` property of the `ICTextLabel` class stores the current time. The displayed time is updated using a timer.
 ```python
 clk_lbl = ICClockLabel("Time")
@@ -44,7 +44,7 @@ clk_lbl = ICClockLabel("Time")
 current_time = clk_lbl.value
 ```
 
-## 3. Basic Button
+## 3. Basic Button (base_button.py)
 Two basic buttons are shown in the figure above. The `ICBaseButton` class inherits the `QWidget` class. The puropse of the class is to capture the click events. The button is created by calling 
 ```python
 # constructor ICBaseButton(name: str, button_id: int)
@@ -85,7 +85,7 @@ def on_ok_click(name: str, id: int):
 
 ```
 
-## 4. Toggle Button
+## 4. Toggle Button (toggle_button.py)
 A toggle button is a state maintaining button. They represent the mechanical swithces. One example is an start-stop switch for any instrument. The toggle button class `ICToggleButton` inherits the `ICBaseButton` class. The toggle button shows a _label_ on the top left. It is used to indicate what type of parameter is being toggled. The main text in the centre changes with the state. There is a LED button to distinguish the two states as shown in the images below.
 <p align="center">
   <img src="https://raw.githubusercontent.com/prosenjit-mdhslab/touchic/main/doc/Screenshot%20from%202021-05-14%2006-55-25.png"/>
@@ -94,8 +94,8 @@ A toggle button is a state maintaining button. They represent the mechanical swi
 
 The toggle button can be created by
 ```python
-# ICToggleButton(label: str, off_text: str, on_text: str, init_state: bool, led_type: ICToggleType)
-btn = ICToggleButton("Operation", "Pause", "Resume", False, ICToggleType.ToggleNormal)
+# ICToggleButton(label: str, off_text: str, on_text: str, init_state: bool, led_type: ICLEDType)
+btn = ICToggleButton("Operation", "Pause", "Resume", False, ICLEDType.ToggleNormal)
 ```
 
 ### 4.1 Properties
@@ -103,7 +103,7 @@ The follwoing properties are available to modify the button behaviour
 1. `state`: a boolean property to **get** or **set** the current state of the toggle button
 2. `label`: the label displayed on the top left of the button
 3. `on_off_text`: a string tupple of (_on text_, _off text_) to be displayed in the button
-4. `type`: used determine the color of the LED used. This can be used to specify the sevrity level of the toggle button. The different types are specified by the `ICToggleType` _Enum_. Toggle type gives an easy way of switching LED colors. LED colors can be independently changed as described below. Type can be also used for moudlating behaviour. Available types are
+4. `led_type`: used determine the color of the LED used. This can be used to specify the sevrity level of the toggle button. The different types are specified by the `ICLEDType` _Enum_. LED type gives an easy way of switching LED colors. LED colors can be independently changed as described below. Type can be also used for moudlating behaviour. Available types are
 + _ToggleNormal_
 + _AlarmCritical_
 + _AlarmNormal_
@@ -118,3 +118,38 @@ The toggle button emits the `toggled` signal. There are two variants
 1. If the _button id_ is define then the emitted signal passes `.state` and `.button_id`
 2. If the _button id_ is not defined then the emitted signal passes the `.state` of the toggle button.
 
+## 5. Alarm Widget (alarm_widget.py)
+Alarms and error messages are an integral part of any instrument control panel. This widget provides a simple way of showing alarms and error codes. The widget consists of a text which displays the error message with the time at which the alarm was raised. The widget also incorporates a toggle button to acknowledge and silent the alarma as seen in the image below. In the image below, three alarm widgets have been added in the dialog box.
+<p align="center">
+  <img src="https://raw.githubusercontent.com/prosenjit-mdhslab/touchic/main/doc/Screenshot%20from%202021-05-15%2011-00-34.png"/>
+</p>
+
+The alarm widget is created in the activated state
+```python
+# ICAlarmWidget(alarm_id: int, alarm_message: str, alarm_description: str, led_type: ICLEDType)
+alrm1 = ICAlarmWidget(0, "critical alarm", "This is a critical alarm.", led_type=ICLEDType.AlarmCritical)
+```
+
+### 5.1 Properties
+The widget can be manipulated using the following properties exposed by the class
+1. `alarm_id`: the id of the alarm. It is an integer. This is not displayed.
+2. `alarm_text`: a short descriptive text that is displayed on the widget.
+3. `alarm_description`: a more descriptive text that helps the user to resolve the problem. This is displayed in a popup dialog that is shown once the user acknowledges the alarm. The popup dialog allows the user to decide if they want to silenece the alarm or leave it in the active state.
+4. `alarm_status`: this is a readonly property showing the current status of the alarm. The return type is `ICAlarmStatus` _Enum_. The possible values are _Active_, _Acknowledged_, or _Inactive_.
+5. `alarm_type`: this is of the `ICLEDType`. Sets the severity level of the alarm. The color of the alarm and the LED is linked to the alarm severity. Changing the alarm severity changes teh colors. The colors can be changed independently as well.
+6. `raised_time`: time at which the alarm was raised. This is readonly property. The return type is datetime.
+7. `acknowledged_time`: time at which the alarm was acknowledged. This is a readonly property. The return type is datetime.
+8. `reactivation_time`: after an alarm is acknowledged it becomes inactive a specified period. The time after which the alarm can be reactivated is given by this parameter.
+9. `message_text_size`: font size of the message text
+10. `message_font_color`: color of the message font
+11. `message_back_color`: background color of the message text
+12. `acknowledge_button`: toggle button used for acknowledging the alarm
+
+### 5.2 Events
+The widget emits the `acknowledged` event, when the alarm is acknowledged by the user. The event passes the __alarm id__ as its parameter.
+
+## 6. Linear Gauge
+A linear gauge is used to graphically display changing values of parameters. 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/prosenjit-mdhslab/touchic/main/doc/Peek%202021-05-15%2012-52.gif"/>
+</p>
