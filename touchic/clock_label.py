@@ -36,14 +36,19 @@ class ICClockLabel(ICTextLabel):
         self.value_text_size = ICDisplayConfig.ClockLabelSize
         self.value_text_color = ICDisplayConfig.ClockLabelColor
         # set the current time
-        now = datetime.now()
-        self.value = now.strftime('%H:%M:%S')
+        self._time_now = datetime.now()
+        self.value = self._time_now.strftime('%H:%M:%S')
         # start the timer
         self._clock_timer = QTimer()
         self._clock_timer.timeout.connect(self.update_time)
         self._clock_timer.start(1000)
 
+    @property
+    def time_now(self):
+        self._time_now = datetime.now()
+        return self._time_now
+
     @pyqtSlot()
     def update_time(self):
-        now = datetime.now()
-        self.value = now.strftime('%H:%M:%S')
+        self._time_now = datetime.now()
+        self.value = self._time_now.strftime('%H:%M:%S')

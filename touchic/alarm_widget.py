@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Created on Wed Apr  1 09:23:22 2020
+Created on May 22 2021
 
 @author: prosenjit
 
@@ -13,7 +13,8 @@ from datetime import datetime
 from enum import Enum
 from .display_config import ICDisplayConfig
 from .toggle_button import ICToggleButton, ICLEDType
-from .base_button import ICBaseButton
+from .basic_button import ICBasicButton
+from .base_widget import ICBaseWidget
 
 
 class ICAlarmMessage(QtWidgets.QDialog):
@@ -36,12 +37,12 @@ class ICAlarmMessage(QtWidgets.QDialog):
         hlay2 = QtWidgets.QHBoxLayout()
 
         # Acknowledge the alarm
-        self._okBut = ICBaseButton("Yes")
+        self._okBut = ICBasicButton("Yes")
         self._okBut.clicked.connect(self.accept)
         hlay2.addWidget(self._okBut)
 
         # Cancel the alarm
-        self._cancelBut = ICBaseButton("No")
+        self._cancelBut = ICBasicButton("No")
         self._cancelBut.clicked.connect(self.reject)
         hlay2.addWidget(self._cancelBut)
 
@@ -58,7 +59,7 @@ class ICAlarmStatus(Enum):
     Inactive = 3
 
 
-class ICAlarmWidget(QtWidgets.QFrame):
+class ICAlarmWidget(ICBaseWidget):
 
     # signal for the
     acknowledged = pyqtSignal(int)
@@ -92,25 +93,33 @@ class ICAlarmWidget(QtWidgets.QFrame):
         self._msg_size = ICDisplayConfig.GeneralTextSize
         self._msg_color = ICDisplayConfig.ErrorTextColor
         self._msg_back_color = ICDisplayConfig.AlarmCriticalOffColor
+        self._msg_border_color = ICDisplayConfig.AlarmCriticalOnColor
 
         # set the background color
         if led_type == ICLEDType.AlarmNormal:
             self._msg_back_color = ICDisplayConfig.AlarmNormalOffColor
+            self._msg_border_color = ICDisplayConfig.AlarmNormalOnColor
         elif led_type == ICLEDType.AlarmInformation:
             self._msg_back_color = ICDisplayConfig.AlarmInformationOffColor
+            self._msg_border_color = ICDisplayConfig.AlarmInformationOnColor
 
         # create the horizontal layout
         layout = QtWidgets.QHBoxLayout()
 
         # short message of the alarm
         self._alarm_disp = QtWidgets.QLabel("", self)
+        self._alarm_disp.setFrameStyle(QtWidgets.QFrame.StyledPanel | QtWidgets.QFrame.Sunken)
         self._alarm_disp.setStyleSheet("QLabel { background-color : " +
                                        ICDisplayConfig.QtColorToSting(self._msg_back_color) + "; color : " +
-                                       ICDisplayConfig.QtColorToSting(self._msg_color) + "; border-radius : 8px;}")
+                                       ICDisplayConfig.QtColorToSting(self._msg_color) + "; border-radius : 8px;"
+                                       " border-color : " + ICDisplayConfig.QtColorToSting(self._msg_border_color) + ";"
+                                       " border-width : 2px; border-style: outset; }")
         self._alarm_disp.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self._alarm_disp.setWordWrap(True)
         self._alarm_disp.setText("<span style='font-size:" + "{}".format(self._msg_size) + "pt;'>" +
                                  "({}):".format(self._raised_time.strftime("%H:%M:%S")) + self._alarm_txt + "</span>")
+
+        # override the default size policy
         self._alarm_disp.setSizePolicy(
             QtWidgets.QSizePolicy.MinimumExpanding,
             QtWidgets.QSizePolicy.MinimumExpanding
@@ -119,19 +128,10 @@ class ICAlarmWidget(QtWidgets.QFrame):
 
         # add the acknowledge button
         self.acknowledge_button = ICToggleButton("Status", "Silent", "Alarmed", True, self._led_type)
-        self.acknowledge_button.toggled[bool].connect(self.ack_clicked)
+        self.acknowledge_button.toggled.connect(self.ack_clicked)
         layout.addWidget(self.acknowledge_button)
+
         self.setLayout(layout)
-
-        self.setSizePolicy(
-            QtWidgets.QSizePolicy.MinimumExpanding,
-            QtWidgets.QSizePolicy.Minimum
-        )
-
-        self.setFrameStyle(QtWidgets.QFrame.StyledPanel | QtWidgets.QFrame.Sunken)
-
-        self.setStyleSheet("background-color : " +
-                           ICDisplayConfig.QtColorToSting(ICDisplayConfig.BackgroundColor) + ";")
 
     # alarm id property
     @property
@@ -181,10 +181,13 @@ class ICAlarmWidget(QtWidgets.QFrame):
         self.acknowledge_button.led_type = at
         if at == ICLEDType.AlarmNormal:
             self._msg_back_color = ICDisplayConfig.AlarmNormalOffColor
+            self._msg_border_color = ICDisplayConfig.AlarmNormalOnColor
         elif at == ICLEDType.AlarmInformation:
             self._msg_back_color = ICDisplayConfig.AlarmInformationOffColor
+            self._msg_border_color = ICDisplayConfig.AlarmInformationOnColor
         else:
             self._msg_back_color = ICDisplayConfig.AlarmCriticalOffColor
+            self._msg_border_color = ICDisplayConfig.AlarmCriticalOnColor
         self.local_update()
 
     # get the last time the alarm was raised (read only)
@@ -240,6 +243,17 @@ class ICAlarmWidget(QtWidgets.QFrame):
         self._msg_back_color = clr
         self.local_update()
 
+    # get message text font color
+    @property
+    def message_border_color(self) -> QtGui.QColor:
+        return self._msg_border_color
+
+    # set time text font color
+    @message_border_color.setter
+    def message_border_color(self, clr: QtGui.QColor) -> None:
+        self._msg_border_color = clr
+        self.local_update()
+
     # acknowledge the alarm and let others know that the alarm has been acknowledged
     @pyqtSlot(bool)
     def ack_clicked(self, st: bool):
@@ -257,9 +271,11 @@ class ICAlarmWidget(QtWidgets.QFrame):
                 self.acknowledge_button.clickable = False
                 # let others know that the alarm has been acknowledged
                 self.acknowledged.emit(self._alarm_id)
+                # add to the history that the alarm was acknowledged
+                self.append_history("acknowledged", self._alarm_id)
             else:
                 # ensure that the acknowledge button resets to the active(on) state
-                self.acknowledge_button.toggle_state = True
+                self.acknowledge_button.switch_position = True
 
     # activate the alarm
     def activate(self) -> None:
@@ -277,11 +293,13 @@ class ICAlarmWidget(QtWidgets.QFrame):
         self._raised_time = datetime.now()
         # as the button is not clickable manually
         # change the state of the acknowledged button
-        self.acknowledge_button.toggle_state = True
+        self.acknowledge_button.switch_position = True
         # make the button clickable
         self.acknowledge_button.clickable = True
         # show the widget
         self.show()
+        # append the event to history
+        self.append_history("activated", self._alarm_id)
         # update the display
         self.local_update()
 
@@ -293,6 +311,8 @@ class ICAlarmWidget(QtWidgets.QFrame):
         self.acknowledge_button.clickable = False
         # hide the widget
         self.hide()
+        # append the event to history
+        self.append_history("deactivated", self._alarm_id)
         # update the display
         self.local_update()
 
@@ -300,10 +320,12 @@ class ICAlarmWidget(QtWidgets.QFrame):
         # update alarm text
         self._alarm_disp.setStyleSheet("QLabel { background-color : " +
                                        ICDisplayConfig.QtColorToSting(self._msg_back_color) + "; color : " +
-                                       ICDisplayConfig.QtColorToSting(self._msg_color) + "; border-radius : 8px;}")
+                                       ICDisplayConfig.QtColorToSting(self._msg_color) + "; border-radius : 8px;"
+                                       " border-color : " + ICDisplayConfig.QtColorToSting(self._msg_border_color) + ";"
+                                       " border-width : 2px; border-style: outset; }")
         self._alarm_disp.setAlignment(Qt.AlignCenter)
         self._alarm_disp.setText("<span style='font-size:" + "{}".format(self._msg_size) + "pt;'>" +
-                                 "({}):".format(self._raised_time.strftime("%H:%M:%S")) + self._alarm_txt + "</span>")
+                                 " ({}) : ".format(self._raised_time.strftime("%H:%M:%S")) + self._alarm_txt + "</span>")
         self._alarm_disp.update()
 
         # update the button

@@ -12,8 +12,9 @@ from PyQt5 import QtGui
 
 class ICDisplayConfig:
     # Overall background
-    BackgroundColor = QtGui.QColor(28, 40, 51)
-    
+    BackgroundColor = QtGui.QColor(38, 50, 56)
+    InFocusColor = QtGui.QColor(255, 87, 34)
+
     # Tab settings
     TabWidth = "100"
     TabHeight = "25"
@@ -22,13 +23,17 @@ class ICDisplayConfig:
     # Text label configurations
     TextLabelWidth = 200
     TextLabelHeight = 65
+    # background color
     LabelBackLightColor = QtGui.QColor(23, 32, 42)
-    LabelBackDarkColor = QtGui.QColor(3, 12, 22) 
+    LabelBackDarkColor = QtGui.QColor(3, 12, 22)
+    # border color
     LabelBorderColor = QtGui.QColor(92, 107, 192)
-    LabelNameSize = 15
+    # text size
+    LabelNameSize = 12
     LabelValueSize = 20
-    LabelNameColor = QtGui.QColor(129, 212, 250)
-    LabelValueColor = QtGui.QColor(0, 255, 0)
+    # text color
+    LabelNameColor = QtGui.QColor(176, 190, 197)
+    LabelValueColor = QtGui.QColor(118, 255, 0)
 
     # Clock label configurations
     ClockLabelSize = 17
@@ -36,11 +41,15 @@ class ICDisplayConfig:
 
     # Configuration for buttons
     ButtonTextSize = 20
-    ButtonTextColorEnabled = QtGui.QColor(100, 30, 22)
-    ButtonTextColorDisabled = QtGui.QColor(100, 100, 100)
-    ButtonColorLight = QtGui.QColor(174, 214, 241)
-    ButtonColorDark = QtGui.QColor(27, 79, 114)
-    
+    ButtonTextColorEnabled = QtGui.QColor(38, 50, 56)
+    ButtonTextColorDisabled = QtGui.QColor(117, 117, 117)
+    # Raised
+    ButtonColorLightRaised = QtGui.QColor(238, 238, 238)
+    ButtonColorDarkRaised = QtGui.QColor(97, 97, 97)
+    # Depressed
+    ButtonColorLightDepressed = QtGui.QColor(97, 97, 97)
+    ButtonColorDarkDepressed = QtGui.QColor(189, 189, 189)
+
     # Button suggested width and height
     ButtonMinWidth = 120
     ButtonMinHeight = 60
@@ -48,30 +57,37 @@ class ICDisplayConfig:
     # Param button specialisation
     ParamButtonMinHeight = 80
     ParamDisplayTextSize = 20
-    ParamButtonLabelTextSize = 15
+    ParamButtonLabelTextSize = 12
     ParamButtonLabelColor = QtGui.QColor("black")
     
     # Radio Button
-    RadioButtonSize = 50
-    RadioBoxColor = QtGui.QColor(0, 255, 153)
-    
-    # Toggle button
-    ToggleButtonMinHeight = 80
-    ToggleOnColor = QtGui.QColor(50, 255, 50)
-    ToggleOffColor = QtGui.QColor(0, 32, 0)
-    
+    RadioButtonHeight = 50
+    RadioButtonWidth = 150
+    RadioBoxBorderColor = QtGui.QColor(236, 239, 241)
+    RadioBoxFillColor = QtGui.QColor(144, 164, 174)
+    RadioBoxTextColor = QtGui.QColor(255, 241, 118)
+
+    ###############################################################
     # Linear Slide
-    LinearSlideWidth = 600
-    LinearSlideHeight = 120
-    LinearSlideBoxColor = QtGui.QColor("lightGray")
-    LinearSlideColorLight = QtGui.QColor(128, 128, 128)
-    LinearSlideColorDark = QtGui.QColor(48, 48, 48)
+    ###############################################################
+    LinearSlideWidth = 400
+    LinearSlideHeight = 150
+    # slide background color
+    LinearSlideBoxColorLight = QtGui.QColor(238, 238, 238)
+    LinearSlideBoxColorDark = QtGui.QColor(157, 157, 157)
+    # color of the groove
+    LinearSlideColorLight = QtGui.QColor(117, 117, 117)
+    LinearSlideColorDark = QtGui.QColor(33, 33, 33)
+    # color of the ruler
     LinearSlideRulerColorDark = QtGui.QColor(1, 87, 155)
     LinearSlideRulerColorLight = QtGui.QColor(79, 195, 247)
-    LinearSLideKnobLight = QtGui.QColor(118, 215, 196)
-    LinearSlideKnobDark = QtGui.QColor(17, 120, 100)
-    
+    # color of the knob
+    LinearSlideKnobLight = QtGui.QColor(176, 190, 197)
+    LinearSlideKnobDark = QtGui.QColor(55, 71, 79)
+
+    ###############################################################
     # General Text Sizes and Colors
+    ###############################################################
     LabelTextSize = 14
     GeneralTextSize = 12
     UnitTextSize = 10
@@ -80,32 +96,58 @@ class ICDisplayConfig:
     ValueTextColorObj = QtGui.QColor(0, 255, 153)
     ErrorTextBackColor = QtGui.QColor(176, 58, 46)
     ErrorTextColor = QtGui.QColor(249, 231, 159)
-    
+
+    ###############################################################
     # Linear Gauge
-    LinearGaugeWidth = 150
-    LinearGuageHeight = 300
-    LinearGaugeBoxColorLight = QtGui.QColor(128, 128, 128)
-    LinearGaugeBoxColorDark = QtGui.QColor(48, 48, 48)
-    LinearGaugeNormalLight = QtGui.QColor(220, 237, 200)
+    ###############################################################
+    # Horizontal dimensions
+    LinearGaugeHorizontalWidth = 350
+    LinearGaugeHorizontalHeight = 150
+    # Vertical dimensions
+    LinearGaugeVerticalWidth = 150
+    LinearGaugeVerticalHeight = 350
+
+    # Default colors for the Gauge
+    # Gauge container
+    LinearGaugeBoxColorLight = QtGui.QColor(117, 117, 117)
+    LinearGaugeBoxColorDark = QtGui.QColor(33, 33, 33)
+    # Gauge bar normal
+    LinearGaugeNormalLight = QtGui.QColor(204, 255, 144)
     LinearGaugeNormalDark = QtGui.QColor(51, 105, 30)
+    # Gauge bar Error
     LinearGaugeErrorLight = QtGui.QColor(248, 187, 208)
     LinearGaugeErrorDark = QtGui.QColor(136, 14, 79)
     LinearGaugeRulerColor = QtGui.QColor(249, 231, 159)
     LinearGaugeLimitsColor = QtGui.QColor(255, 87, 34)
-    
+
+    ###############################################################
     # Plots
+    ###############################################################
     PlotWidth = 450
     PlotHeight = 120
     PlotBufferSpace = 0.1
 
-    # Alarms
-    AlarmCriticalOffColor = QtGui.QColor(32, 5, 5)
-    AlarmCriticalOnColor = QtGui.QColor(255, 25, 25)
-    AlarmNormalOffColor = QtGui.QColor(100, 34, 0) 
-    AlarmNormalOnColor = QtGui.QColor(220, 118, 51)
-    AlarmInformationOffColor = QtGui.QColor(4, 88, 71)
-    AlarmInformationOnColor = QtGui.QColor(72, 201, 176)
+    # default colors
+    DefaultPlotFaceColor = QtGui.QColor('#1C2833')
+    DefaultPlotLineColor = QtGui.QColor('#FFEE58')
+    DefaultPlotYMarkerColor = QtGui.QColor('#D98880')
+    DefaultPlotXMarkerColor = QtGui.QColor('#DDCC36')
 
+    ###############################################################
+    # Toggle Button and LEDs
+    ###############################################################
+    # Toggle button
+    ToggleButtonMinHeight = 80
+
+    # LED Colors
+    ToggleOffColor = QtGui.QColor(0, 0, 31)
+    ToggleOnColor = QtGui.QColor(0, 0, 204)
+    AlarmCriticalOffColor = QtGui.QColor(31, 0, 0)
+    AlarmCriticalOnColor = QtGui.QColor(204, 0, 0)
+    AlarmNormalOffColor = QtGui.QColor(31, 17, 0)
+    AlarmNormalOnColor = QtGui.QColor(204, 102, 0)
+    AlarmInformationOffColor = QtGui.QColor(0, 31, 17)
+    AlarmInformationOnColor = QtGui.QColor(0, 204, 102)
 
     @staticmethod
     def QtColorToSting(clr: QtGui.QColor):
