@@ -6,6 +6,8 @@ Created on Sun Apr 19 17:53:58 2020
 
 This is the base class for the default constants (colors, font size, etc.) used for
 rendering the controls.  These can be overridden by changing them at the object level.
+
+TODO: Implement local color class
 """
 from PyQt5 import QtGui
 
@@ -55,8 +57,8 @@ class ICDisplayConfig:
     ButtonMinHeight = 60
     
     # Param button specialisation
-    ParamButtonMinHeight = 80
-    ParamDisplayTextSize = 20
+    ParamButtonMinHeight = 110
+    ParamDisplayTextSize = 18
     ParamButtonLabelTextSize = 12
     ParamButtonLabelColor = QtGui.QColor("black")
     
@@ -81,6 +83,9 @@ class ICDisplayConfig:
     # color of the ruler
     LinearSlideRulerColorDark = QtGui.QColor(1, 87, 155)
     LinearSlideRulerColorLight = QtGui.QColor(79, 195, 247)
+    # color of the ruler during alarm
+    LinearSlideRulerAlarmColorDark = QtGui.QColor(136, 14, 79)
+    LinearSlideRulerAlarmColorLight = QtGui.QColor(248, 187, 208)
     # color of the knob
     LinearSlideKnobLight = QtGui.QColor(176, 190, 197)
     LinearSlideKnobDark = QtGui.QColor(55, 71, 79)
@@ -102,10 +107,13 @@ class ICDisplayConfig:
     ###############################################################
     # Horizontal dimensions
     LinearGaugeHorizontalWidth = 350
-    LinearGaugeHorizontalHeight = 150
+    LinearGaugeHorizontalMaxHeight = 175
     # Vertical dimensions
-    LinearGaugeVerticalWidth = 150
     LinearGaugeVerticalHeight = 350
+    LinearGaugeVerticalMaxWidth = 150
+
+    # Gauge Width in Pixels
+    LinearGaugeWidth = 40
 
     # Default colors for the Gauge
     # Gauge container
@@ -118,18 +126,23 @@ class ICDisplayConfig:
     LinearGaugeErrorLight = QtGui.QColor(248, 187, 208)
     LinearGaugeErrorDark = QtGui.QColor(136, 14, 79)
     LinearGaugeRulerColor = QtGui.QColor(249, 231, 159)
+    # limits
     LinearGaugeLimitsColor = QtGui.QColor(255, 87, 34)
+    LinearGaugeMinMaxColor = QtGui.QColor(255, 241, 118)
+    LinearGaugeTargetColor = QtGui.QColor(225, 190, 231)
 
     ###############################################################
     # Plots
     ###############################################################
     PlotWidth = 450
-    PlotHeight = 120
+    PlotHeight = 150
     PlotBufferSpace = 0.1
 
     # default colors
     DefaultPlotFaceColor = QtGui.QColor('#1C2833')
-    DefaultPlotLineColor = QtGui.QColor('#FFEE58')
+    DefaultPlotSelectedColor = QtGui.QColor('#FF3333')
+
+    # marker colors
     DefaultPlotYMarkerColor = QtGui.QColor('#D98880')
     DefaultPlotXMarkerColor = QtGui.QColor('#DDCC36')
 
@@ -148,6 +161,26 @@ class ICDisplayConfig:
     AlarmNormalOnColor = QtGui.QColor(204, 102, 0)
     AlarmInformationOffColor = QtGui.QColor(0, 31, 17)
     AlarmInformationOnColor = QtGui.QColor(0, 204, 102)
+
+    ###############################################################
+    # Alphanumeric Input
+    ###############################################################
+    DataInputNumericWidth = 350
+    DataInputNumericHeight = 390
+
+    DataInputAlphabetWidth = 650
+    DataInputAlphabetHeight = 260
+
+    ###############################################################
+    # Rotary Gauge
+    ###############################################################
+    RotaryGaugeHeight = 150
+    RotaryGaugeWidth = 150
+
+    # limits
+    RotaryGaugeLimitsColor = QtGui.QColor(255, 125, 125)
+    RotaryGaugeMinMaxColor = QtGui.QColor(255, 241, 118)
+    RotaryGaugeTargetColor = QtGui.QColor(225, 190, 231)
 
     @staticmethod
     def QtColorToSting(clr: QtGui.QColor):

@@ -5,14 +5,15 @@ Created on May 18 2021
 @author: Prosenjit
 
 This a base class for most widgets
+TODO: History should be truned off by default
 """
 
-from enum import Enum
+from enum import Enum, Flag
 from collections import deque
 from weakref import WeakValueDictionary
-from datetime import datetime
+from datetime import datetime, timedelta
 from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt
 from .display_config import ICDisplayConfig
 
 
@@ -28,23 +29,31 @@ class ICWidgetState(Enum):
     Hidden = 4
 
 
-class ICWidgetOrientation(Enum):
+class ICWidgetPosition(Flag):
     """
-    Enum of widget orientation
+        Enum for positioning of LED or other components within a widget
     """
-    Horizontal = 0
-    Vertical = 1
+    Bottom = 1
+    Top = 2
+    Left = 4
+    Right = 8
 
+    @classmethod
+    def opposite(cls, pos):
+        if pos == cls.Top:
+            return cls.Bottom
+        elif pos == cls.Bottom:
+            return cls.Top
+        elif pos == cls.Right:
+            return cls.Left
+        else:
+            return cls.Right
 
-# position of components withing widgets
-class ICWidgetPosition(Enum):
-    """
-    Position of LED or other components within a widget
-    """
-    Bottom = 0
-    Top = 1
-    Left = 2
-    Right = 3
+    def is_horizontal(self) -> bool:
+        return self in ICWidgetPosition.Bottom | ICWidgetPosition.Top
+
+    def is_vertical(self) -> bool:
+        return self in ICWidgetPosition.Right | ICWidgetPosition.Left
 
 
 class ICWidgetHistory:
@@ -72,7 +81,7 @@ class ICBaseWidget(QtWidgets.QWidget):
 
     # instances dictionary for accessing all active widgets and accessing their event history
     _instances = WeakValueDictionary()
-    _instance_number = 0
+    _instance_number: int = 0
 
     def __init__(self, widget_id: int = 0, *args, **kwargs):
         super(ICBaseWidget, self).__init__(*args, **kwargs)
@@ -80,6 +89,9 @@ class ICBaseWidget(QtWidgets.QWidget):
         # add the widget to the class level dictionary
         ICBaseWidget._instance_number += 1
         ICBaseWidget._instances[ICBaseWidget._instance_number] = self
+
+        # store the instance id
+        self._instance_id: int = ICBaseWidget._instance_number
 
         # id of the widget
         self._widget_id: int = widget_id
@@ -91,7 +103,7 @@ class ICBaseWidget(QtWidgets.QWidget):
         self._state: ICWidgetState = ICWidgetState.VisibleEnabled
 
         # set the widget orientation
-        self._orientation: ICWidgetOrientation = ICWidgetOrientation.Horizontal
+        self._position: ICWidgetPosition = ICWidgetPosition.Bottom
 
         # focus-ability and in/out state management
         self._focusable: bool = False
@@ -101,6 +113,12 @@ class ICBaseWidget(QtWidgets.QWidget):
         self._enable_history: bool = False
         self._history_len: int = 20
         self._history = deque(maxlen=self._history_len)
+
+        # time of last event
+        self._last_event_time: datetime = datetime.now()
+
+        # append timeout for consecutive events
+        self._event_append_timeout: int = 0
 
         # background color
         self._background_color: QtGui.QColor = ICDisplayConfig.BackgroundColor
@@ -115,10 +133,7 @@ class ICBaseWidget(QtWidgets.QWidget):
         self._height_min: int = 0
 
         # setup visual effects
-        self.setSizePolicy(
-            QtWidgets.QSizePolicy.Minimum,
-            QtWidgets.QSizePolicy.Minimum
-        )
+        self.setSizePolicy(QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Minimum)
 
         # background color of the button
         self.setStyleSheet("background-color : " + ICDisplayConfig.QtColorToSting(self._background_color) + ";")
@@ -159,26 +174,28 @@ class ICBaseWidget(QtWidgets.QWidget):
     # set the visibility of the button
     @state.setter
     def state(self, st: ICWidgetState) -> None:
-        self._state = st
-        if self._state in (ICWidgetState.Hidden, ICWidgetState.Transparent, ICWidgetState.VisibleDisabled):
-            self._clickable = False
-        else:
-            self._clickable = True
-        self.on_state_changed()
-        self.update()
+        if self._state != st:
+            self._state = st
+            if self._state in (ICWidgetState.Hidden, ICWidgetState.Transparent, ICWidgetState.VisibleDisabled):
+                self._clickable = False
+            else:
+                self._clickable = True
+            self.on_state_changed()
+            self.update()
 
-    # get the orientation of the widget
+    # get the position of the component or widget with respect to other widgets
     # this only maintains the property here. actual rendering is class dependent.
     @property
-    def orientation(self) -> ICWidgetOrientation:
-        return self._orientation
+    def position(self) -> ICWidgetPosition:
+        return self._position
 
     # set the orientation of the widget
-    @orientation.setter
-    def orientation(self, orient: ICWidgetOrientation) -> None:
-        self._orientation = orient
-        self.on_orientation_changed()
-        self.update()
+    @position.setter
+    def position(self, pos: ICWidgetPosition) -> None:
+        if self._position != pos:
+            self._position = pos
+            self.on_position_changed()
+            self.update()
 
     # get focusable property
     @property
@@ -219,6 +236,20 @@ class ICBaseWidget(QtWidgets.QWidget):
     def history(self) -> deque:
         return self._history
 
+    # last event time readonly
+    @property
+    def last_event_time(self) -> datetime:
+        return self._last_event_time
+
+    # append timeout
+    @property
+    def history_append_interval_millis(self) -> int:
+        return self._event_append_timeout
+
+    @history_append_interval_millis.setter
+    def history_append_interval_millis(self, tm: int) -> None:
+        self._event_append_timeout = tm
+
     # get background colour
     @property
     def background_color(self) -> QtGui.QColor:
@@ -243,12 +274,12 @@ class ICBaseWidget(QtWidgets.QWidget):
 
     # get size hint
     @property
-    def size_hint(self) -> [int, int]:
+    def size_hint(self) -> tuple[int, int]:
         return self._width_min, self._height_min
 
     # set size hint
     @size_hint.setter
-    def size_hint(self, sz: [int, int]) -> None:
+    def size_hint(self, sz: tuple[int, int]) -> None:
         self._width_min = sz[0]
         self._height_min = sz[1]
 
@@ -257,13 +288,19 @@ class ICBaseWidget(QtWidgets.QWidget):
     ########################################################
     # append to event history
     def append_history(self, desc: str, val: float) -> None:
-        t = datetime.now()
-        event = ICWidgetHistory(t, desc, val)
-        self._history.append(event)
+        t_now = datetime.now()
+        interval = (t_now - self._last_event_time)/timedelta(milliseconds=1)
+        if interval > self.history_append_interval_millis:
+            self._last_event_time = t_now
+            self._history.append(ICWidgetHistory(t_now, desc, val))
 
     # clear the event history
     def clear_history(self) -> None:
         self._history.clear()
+
+    # dhow the history
+    def display_history(self) -> None:
+        pass
 
     # class method to get access to all the active instances
     @classmethod
@@ -289,8 +326,12 @@ class ICBaseWidget(QtWidgets.QWidget):
     def on_focus_changed(self, event: QtGui.QFocusEvent) -> None:
         pass
 
-    # orientation changed
-    def on_orientation_changed(self) -> None:
+    # wheel rotated
+    def on_wheel_rotated(self, event: QtGui.QWheelEvent) -> None:
+        pass
+
+    # position changed
+    def on_position_changed(self) -> None:
         pass
 
     # state changed
@@ -342,3 +383,8 @@ class ICBaseWidget(QtWidgets.QWidget):
     def mouseReleaseEvent(self, event) -> None:
         if self._clickable:
             self.on_mouse_released(event)
+
+    # wheel rotate event
+    def wheelEvent(self, a0: QtGui.QWheelEvent) -> None:
+        if self._clickable:
+            self.on_wheel_rotated(a0)

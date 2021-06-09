@@ -8,28 +8,32 @@ A class to plot 2D data
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
-from .display_config import ICDisplayConfig
-from .base_widget import ICBaseWidget, ICWidgetState
 from typing import Union
 import numpy as np
+from .display_config import ICDisplayConfig
+from .base_widget import ICBaseWidget, ICWidgetState, ICWidgetPosition
+from .linear_axis import ICLinearAxisContainer, ICLinearContainerType, ICLinearAxis
 
 
 class ICGraph(ICBaseWidget):
     """
-    A widget class to plot 2D graphs
+    A widget class to draw 2D graphs and plots
     """
     # clicked event
     clicked = pyqtSignal(str, str, int, float, float)
 
-    # constants to configure the plotting
-    SCREEN_X_LEFT_GUTTER = 65
-    SCREEN_X_RIGHT_GUTTER = 50
-    SCREEN_Y_TOP_GUTTER = 10
-    SCREEN_Y_BOTTOM_GUTTER_LBL = 30
-    SCREEN_Y_BOTTOM_GUTTER_NO_LBL = 10
+    # current value changed
+    current_changed = pyqtSignal(float)
+
+    # x axis rescaled
+    rescaled_x = pyqtSignal()
+
+    # y axis rescaled
+    rescaled_y = pyqtSignal()
 
     def __init__(self, name: str, auto_scale: bool = True, widget_id: int = 0, *args, **kwargs):
         super(ICGraph, self).__init__(widget_id, *args, **kwargs)
+
         ######################################
         # name of the graph
         ######################################
@@ -38,6 +42,9 @@ class ICGraph(ICBaseWidget):
         ######################################
         # plotting data
         ######################################
+        # primary line name
+        self._primary_name: str = ""
+
         # raw data
         self._plot_x_data: dict[str, np.ndarray] = {}
         self._plot_y_data: dict[str, np.ndarray] = {}
@@ -54,7 +61,16 @@ class ICGraph(ICBaseWidget):
         self._selected_index: dict[str, int] = {}
 
         # default level if not 0. it is used to plot the level for missing points in live data
-        self._default_level: float = 0
+        self._base_level: float = 0
+
+        # ring index for push operation
+        self._ring_index: int = 0
+
+        # alarm level
+        self._lower_alarm_level_name: str = ""
+        self._upper_alarm_level_name: str = ""
+
+        self.alarm_activated: bool = False
 
         ######################################
         # Marker lines to draw horizontal or vertical lines to show limits
@@ -78,7 +94,7 @@ class ICGraph(ICBaseWidget):
         self._scale_y_max: float = -1.0e18
 
         # y range limit.
-        # During autoscaling _ymin and _ymax is limited to these values
+        # During autoscaling y_min and y_max is limited to these values
         self._auto_scale_y_min_limit: [float, float] = None
         self._auto_scale_y_max_limit: [float, float] = None
 
@@ -96,63 +112,113 @@ class ICGraph(ICBaseWidget):
         ######################################
         # general appearance
         ######################################
-        self._face_color: QtGui.QColor = ICDisplayConfig.DefaultPlotFaceColor
-        self._line_color: QtGui.QColor = ICDisplayConfig.DefaultPlotLineColor
+        self.background_color = ICDisplayConfig.DefaultPlotFaceColor
 
-        # determines if x and y labels are shown
-        self._x_tick_label: bool = True
-        self._y_tick_label: bool = True
+        # selected color
+        self._selected_color = ICDisplayConfig.DefaultPlotSelectedColor
 
-        # format for the axis label
-        self._axis_label_format: str = "{0:.2f}"
-
-        # size
-        self.size_hint = (ICDisplayConfig.PlotWidth, ICDisplayConfig.PlotHeight + 20)
+        # size hint
+        self.size_hint = (ICDisplayConfig.PlotWidth, ICDisplayConfig.PlotHeight)
 
         # basic property
-        self.focusable = True
+        self.focusable = False
         self.clickable = True
 
-        # override the default size policy
-        self.setSizePolicy(
-            QtWidgets.QSizePolicy.MinimumExpanding,
-            QtWidgets.QSizePolicy.MinimumExpanding
-        )
+        # size hint
+        self.size_hint = (ICDisplayConfig.PlotWidth, ICDisplayConfig.PlotHeight)
 
-        # plots can have different background color
-        self.setStyleSheet("background-color : " + ICDisplayConfig.QtColorToSting(self._face_color) + ";")
+        # override the default size policy
+        self.setSizePolicy(QtWidgets.QSizePolicy.MinimumExpanding, QtWidgets.QSizePolicy.MinimumExpanding)
 
     ###################################################
     #    Properties
     ###################################################
-    # name of the plot
     @property
     def name(self) -> str:
         return self._name
 
-    @name.setter
-    def name(self, nm: str) -> None:
-        self._name = nm
-        self.update()
-
-    # returns a tuple of x_tick_label and y_tick_label
     @property
-    def tick_labels(self) -> [bool, bool]:
-        return self._x_tick_label, self._y_tick_label
+    def x_data(self) -> dict[str, np.ndarray]:
+        return self._plot_x_data
 
-    @tick_labels.setter
-    def tick_labels(self, show_labels: [bool, bool]) -> None:
-        self._x_tick_label = show_labels[0]
-        self._y_tick_label = show_labels[1]
+    @property
+    def y_data(self) -> dict[str, np.ndarray]:
+        return self._plot_y_data
 
-        # adjust the display size if x tick labels are shown or not
-        if self._x_tick_label:
-            self.size_hint = (ICDisplayConfig.PlotWidth, ICDisplayConfig.PlotHeight + 20)
-        else:
-            self.size_hint = (ICDisplayConfig.PlotWidth, ICDisplayConfig.PlotHeight)
+    @property
+    def line_color(self) -> dict[str, QtGui.QColor]:
+        return self._plot_line_color
 
-        # update the screen
+    @property
+    def fill_color(self) -> dict[str, QtGui.QColor]:
+        return self._plot_fill_color
+
+    @property
+    def plot_style(self) -> dict[str, Union[str, Qt.PenStyle]]:
+        return self._plot_style
+
+    @property
+    def plot_is_line(self) -> dict[str, bool]:
+        return self._plot_is_line
+
+    @property
+    def y_maker_line(self) -> dict[str, float]:
+        return self._y_marker_lines
+
+    @property
+    def y_marker_line_color(self) -> dict[str, QtGui.QColor]:
+        return self._y_marker_line_colors
+
+    @property
+    def x_maker_line(self) -> dict[str, float]:
+        return self._x_marker_lines
+
+    @property
+    def x_marker_line_color(self) -> dict[str, QtGui.QColor]:
+        return self._x_marker_line_colors
+
+    @property
+    def base_level(self) -> float:
+        return self._base_level
+
+    @base_level.setter
+    def base_level(self, level: float) -> None:
+        self._base_level = level
+        self._local_update()
+
+    @property
+    def auto_scale(self) -> bool:
+        return self._auto_scale
+
+    @auto_scale.setter
+    def auto_scale(self, scl: bool) -> None:
+        self._auto_scale = scl
         self.update()
+
+    @property
+    def selected_color(self) -> QtGui.QColor:
+        return self._selected_color
+
+    @selected_color.setter
+    def selected_color(self, clr: QtGui.QColor) -> None:
+        self._selected_color = clr
+        self.update()
+
+    @property
+    def display_y_max(self) -> float:
+        return self._scale_y_max
+
+    @property
+    def display_y_min(self) -> float:
+        return self._scale_y_min
+
+    @property
+    def display_x_max(self) -> float:
+        return self._display_x_max
+
+    @property
+    def display_x_min(self) -> float:
+        return self._display_x_min
 
     ###################################################
     #    Functions
@@ -175,21 +241,23 @@ class ICGraph(ICBaseWidget):
             +       : plus marker
             *       : star marker
     """
-    def add_line(self, line_name: str, x_data: list[float], y_data: list[float], style: str,
-                 line_color: str, fill_color: str = "", rescale_display: float = False) -> None:
+    def add_line(self, line_name: str, x_data: list[float], y_data: list[float], style: str, line_color: str, fill_color: str = "",
+                 rescale_display: float = False) -> None:
+
         # x and y length should be same
         if len(x_data) != len(y_data):
             return
 
-        # convert to numpy array
-        x_data = np.array(x_data)
-        y_data = np.array(y_data)
+        # the first line dded to the plot is the primary line
+        if not self._primary_name:
+            self._primary_name = line_name
 
         # add the data and color to the dictionary
-        self._plot_x_data[line_name] = x_data
-        self._plot_y_data[line_name] = y_data
-        self._plot_line_colors[line_name] = QtGui.QColor(line_color)
-        if fill_color != "":
+        self._plot_x_data[line_name] = np.array(x_data)
+        self._plot_y_data[line_name] = np.array(y_data)
+
+        self._plot_line_color[line_name] = QtGui.QColor(line_color)
+        if fill_color:
             self._plot_fill_color[line_name] = QtGui.QColor(fill_color)
 
         # set the plot style
@@ -212,102 +280,133 @@ class ICGraph(ICBaseWidget):
             self._plot_is_line[line_name] = True
             self._plot_style[line_name] = Qt.SolidLine
 
-        # reset y limits if the plot is autoscaling
-        self._scale_y_range()
-        # reset x limits for the plotting
-        self._scale_x_range()
+        # reset y limits if the plot is autoscaling and notify others of the change
+        if self._scale_y_range():
+            self.rescaled_y.emit()
 
-        # set display limits
-        if rescale_display:
-            self._display_x_min = self._scale_x_min
-            self._display_x_max = self._scale_x_max
-        else:
-            self._display_x_min = self._display_x_min \
-                if self._scale_x_max > self._display_x_min > self._scale_x_min \
-                else self._scale_x_min
-            self._display_x_max = self._display_x_max \
-                if self._scale_x_max > self._display_x_max > self._scale_x_min \
-                else self._scale_x_max
+        # rescale the x axis and notify others about x axis rescaling
+        if self._scale_display_x(rescale_display):
+            self.rescaled_x.emit()
 
         # update the screen
         self.update()
 
     """
+        Scale x axis display coordinates 
+    """
+    def _scale_display_x(self, rescale_display: bool) -> bool:
+        # reset x limits for the plotting
+        self._scale_x_range()
+
+        scaled_x = False
+
+        # set display limits
+        if rescale_display:
+            if self._display_x_min != self._scale_x_min:
+                self._display_x_min = self._scale_x_min
+                scaled_x = True
+
+            if self._display_x_max != self._scale_x_max:
+                self._display_x_max = self._scale_x_max
+                scaled_x = True
+        else:
+            if not (self._scale_x_max > self._display_x_min > self._scale_x_min):
+                self._display_x_min = self._scale_x_min
+                scaled_x = True
+
+            if not (self._scale_x_max > self._display_x_max > self._scale_x_min):
+                self._display_x_max = self._scale_x_max
+                scaled_x = True
+
+        return scaled_x
+
+    """
         Scale x axis for all lines in the plot
     """
-    def _scale_x_range(self) -> None:
-        self._scale_x_min = 1.0e18
-        self._scale_x_max = -1.0e18
+    def _scale_x_range(self) -> bool:
+        new_min = 1.0e18
+        new_max = -1.0e18
+
+        scaled = False
 
         # find max and min based on the x data of the plots
         for line_name in self._plot_x_data:
             x_arr = self._plot_x_data[line_name]
             if x_arr.size < 2:
                 continue
-            line_min = x_arr.min(initial=self._scale_x_min)
-            line_max = x_arr.max(initial=self._scale_x_max)
-            self._scale_x_min = self._scale_x_min if (self._scale_x_min < line_min) else line_min
-            self._scale_x_max = self._scale_x_max if (self._scale_x_max > line_max) else line_max
+            line_min = x_arr.min(initial=new_min)
+            line_max = x_arr.max(initial=new_max)
+            new_min = new_min if new_min < line_min else line_min
+            new_max = new_max if new_max > line_max else line_max
 
         # find max and min based on the x markers
         for marker_name in self._x_marker_lines:
             x_pos = self._x_marker_lines[marker_name]
-            self._scale_x_min = self._scale_x_min if (self._scale_x_min < x_pos) else x_pos
-            self._scale_x_max = self._scale_x_max if (self._scale_x_max > x_pos) else x_pos
+            new_min = new_min if new_min < x_pos else x_pos
+            new_max = new_max if new_max > x_pos else x_pos
 
-    """
-        Reset y scale based on one line
-    """
-    def _scale_y(self, y_arr: np.ndarray) -> None:
-        # proceed only if auto scaling is on
-        if not self._auto_scale:
-            return
+        if new_min != self._scale_x_min:
+            self._scale_x_min = new_min
+            scaled = True
 
-        # check for empty array in the
-        if y_arr.size > 1:
-            line_y_max = y_arr.max(initial=self._scale_y_max)
-            line_y_min = y_arr.min(initial=self._scale_y_min)
-            self._scale_y_max = self._scale_y_max if (self._scale_y_max > line_y_max) else line_y_max
-            self._scale_y_min = self._scale_y_min if (self._scale_y_min < line_y_min) else line_y_min
+        if new_max != self._scale_x_max:
+            self._scale_x_max = new_max
+            scaled = True
+
+        return scaled
 
     """
         Scale for all lines in the plot
     """
-    def _scale_y_range(self) -> None:
+    def _scale_y_range(self) -> bool:
         # return if auto scaling is turned off
         if not self._auto_scale:
-            return
+            return False
+
+        scaled = False
 
         # reset the scale maximum and minimum
-        self._scale_y_min = 1.0e18
-        self._scale_y_max = -1.0e18
+        new_min = 1.0e18
+        new_max = -1.0e18
 
         # find max an min from the y marker lines
         for marker_name in self._y_marker_lines:
             y_pos = self._y_marker_lines[marker_name]
-            self._scale_y_min = self._scale_y_min if (self._scale_y_min < y_pos) else y_pos
-            self._scale_y_max = self._scale_y_max if (self._scale_y_max > y_pos) else y_pos
+            new_min = new_min if new_min < y_pos else y_pos
+            new_max = new_max if new_max > y_pos else y_pos
 
         for line_name in self._plot_y_data:
-            self._scale_y(self._plot_y_data[line_name])
+            y_arr = self._plot_y_data[line_name]
+            if y_arr.size < 2:
+                continue
+            line_max = y_arr.max(initial=new_max)
+            line_min = y_arr.min(initial=new_min)
+            new_min = new_min if new_min < line_min else line_min
+            new_max = new_max if new_max > line_max else line_max
 
         # provide for additional gap
-        add_gap_y = (self._scale_y_max - self._scale_y_min) * ICDisplayConfig.PlotBufferSpace
-        self._scale_y_max += add_gap_y
-        self._scale_y_min -= add_gap_y
+        add_gap_y = (new_max - new_min) * ICDisplayConfig.PlotBufferSpace
+        new_max += add_gap_y
+        new_min -= add_gap_y
 
         # ensure that the min and max limit is within the defined range
         if self._auto_scale_y_min_limit is not None:
-            self._scale_y_min = self._scale_y_min if (self._scale_y_min > self._auto_scale_y_min_limit[0]) \
-                else self._auto_scale_y_min_limit[0]
-            self._scale_y_min = self._scale_y_min if (self._scale_y_min < self._auto_scale_y_min_limit[1]) \
-                else self._auto_scale_y_min_limit[1]
+            new_min = new_min if new_min > self._auto_scale_y_min_limit[0] else self._auto_scale_y_min_limit[0]
+            new_min = new_min if new_min < self._auto_scale_y_min_limit[1] else self._auto_scale_y_min_limit[1]
 
         if self._auto_scale_y_max_limit is not None:
-            self._scale_y_max = self._scale_y_max if (self._scale_y_max > self._auto_scale_y_max_limit[0]) \
-                else self._auto_scale_y_max_limit[0]
-            self._scale_y_max = self._scale_y_max if (self._scale_y_max < self._auto_scale_y_max_limit[1]) \
-                else self._auto_scale_y_max_limit[1]
+            new_max = new_max if new_max > self._auto_scale_y_max_limit[0] else self._auto_scale_y_max_limit[0]
+            new_max = new_max if new_max < self._auto_scale_y_max_limit[1] else self._auto_scale_y_max_limit[1]
+
+        if new_min != self._scale_y_min:
+            self._scale_y_min = new_min
+            scaled = True
+
+        if new_max != self._scale_y_max:
+            self._scale_y_max = new_max
+            scaled = True
+
+        return scaled
 
     """
         Update data for a given line
@@ -320,39 +419,119 @@ class ICGraph(ICBaseWidget):
         # update the data
         self._plot_y_data[line_name] = np.array(data)
 
-        # reset limits and update the screen
-        self._scale_y_range()
+        # reset limits, notify others and update the screen
+        if self._scale_y_range():
+            self.rescaled_y.emit()
+
+        # update the view
+        self.update()
+
+    """
+       Push new data point for the current line
+       self._ring_index is used to maintain the current position
+    """
+    def push_data(self, all_line_names: tuple[str], data_set: tuple[float], rescale: bool = True) -> None:
+        # check for wrap around
+        if self._plot_x_data[self._primary_name].size == self._ring_index:
+            self._ring_index = 0
+
+        for line_name in self._plot_x_data.keys():
+            try:
+                index = all_line_names.index(line_name)
+                new_value = data_set[index]
+            except ValueError:
+                new_value = self._base_level
+
+            line: np.ndarray = self._plot_y_data[line_name]
+
+            # update data
+            line[self._ring_index] = new_value
+
+            # update about the change in primary line
+            if line_name == self._primary_name:
+                self.current_changed[float].emit(new_value)
+
+                # check for alarm
+                self.alarm_activated = False
+                if self._lower_alarm_level_name:
+                    if new_value < self._y_marker_lines[self._lower_alarm_level_name]:
+                        self.alarm_activated = True
+
+                if self._upper_alarm_level_name:
+                    if new_value > self._y_marker_lines[self._upper_alarm_level_name]:
+                        self.alarm_activated = True
+
+            # remove the next point
+            next_index = (self._ring_index + 5) % line.size
+            line[next_index] = self._base_level
+
+        # if auto scaling is on the plot is completely auto-scaled once at the beginning of the cycle
+        if self._auto_scale and rescale:
+            if self._ring_index == 0:
+                if self._scale_y_range():
+                    self.rescaled_y.emit()
+            else:
+                scaled = False
+
+                min_data = min(data_set)
+                if min_data < self._scale_y_min:
+                    new_min = min_data
+
+                    # ensure that the min and max limit is within the defined range
+                    if self._auto_scale_y_min_limit is not None:
+                        new_min = new_min if new_min > self._auto_scale_y_min_limit[0] else self._auto_scale_y_min_limit[0]
+                        new_min = new_min if new_min < self._auto_scale_y_min_limit[1] else self._auto_scale_y_min_limit[1]
+
+                    if new_min != self._scale_y_min:
+                        self._scale_y_min = new_min
+                        scaled = True
+
+                max_data = max(data_set)
+                if max_data > self._scale_y_max:
+                    new_max = max_data
+
+                    # ensure that the min and max limit is within the defined range
+                    if self._auto_scale_y_max_limit is not None:
+                        new_max = new_max if new_max > self._auto_scale_y_max_limit[0] else self._auto_scale_y_max_limit[0]
+                        new_max = new_max if new_max < self._auto_scale_y_max_limit[1] else self._auto_scale_y_max_limit[1]
+
+                    if new_max != self._scale_y_max:
+                        self._scale_y_max = new_max
+                        scaled = True
+
+                # notify others about y axis rescaling
+                if scaled:
+                    self.rescaled_y.emit()
+
+        # increment the ring index and request view update
+        self._ring_index += 1
         self.update()
 
     """
         Remove line from the plot
     """
     def remove_line(self, line_name: str, rescale_display: bool = False) -> None:
-        if line_name in self._plot_x_data.keys():
+        # cannot remove the primary line
+        if line_name == self._primary_name:
+            return
+
+        if line_name in self._plot_fill_color:
+            self._plot_fill_color.pop(line_name)
+
+        if line_name in self._plot_x_data:
             self._plot_x_data.pop(line_name)
             self._plot_y_data.pop(line_name)
             self._plot_line_color.pop(line_name)
             self._plot_style.pop(line_name)
             self._plot_is_line.pop(line_name)
 
-        if line_name in self._plot_fill_color:
-            self._plot_fill_color.pop(line_name)
+            # rescale the y axis
+            if self._scale_y_range():
+                self.rescaled_y.emit()
 
-            # rescale the x and y axis
-            self._scale_x_range()
-            self._scale_y_range()
-
-            # rescale the display
-            if rescale_display:
-                self._display_x_min = self._scale_x_min
-                self._display_x_max = self._scale_x_max
-            else:
-                self._display_x_min = self._display_x_min \
-                    if self._scale_x_max > self._display_x_min > self._scale_x_min \
-                    else self._scale_x_min
-                self._display_x_max = self._display_x_max \
-                    if self._scale_x_max > self._display_x_max > self._scale_x_min \
-                    else self._scale_x_max
+            # rescale the x axis display
+            if self._scale_display_x(rescale_display):
+                self.rescaled_x.emit()
 
             # update the screen
             self.update()
@@ -360,33 +539,88 @@ class ICGraph(ICBaseWidget):
     """
        Add limit lines to the plot window
     """
-    def add_y_marker(self, marker_name: str, y_pos: float,
-                     marker_color: QtGui.QColor = ICDisplayConfig.DefaultPlotYMarkerColor) -> None:
+    def add_y_marker(self, marker_name: str, y_pos: float, marker_color: QtGui.QColor = ICDisplayConfig.DefaultPlotYMarkerColor) -> None:
         self._y_marker_lines[marker_name] = y_pos
         self._y_marker_line_colors[marker_name] = marker_color
 
-        # readjust the auto scale limits
-        if self._auto_scale:
-            self._scale_y_max = self._scale_y_max if (self._scale_y_max > y_pos) else y_pos
-            self._scale_y_min = self._scale_y_min if (self._scale_y_min < y_pos) else y_pos
+        # reset y limits if the plot is autoscaling and notify others of the change
+        if self._scale_y_range():
+            self.rescaled_y.emit()
 
         # update the screen
         self.update()
+
+    """
+        Remove y marker line from the plot
+    """
+    def remove_y_marker_line(self, line_name: str) -> None:
+        if line_name in self._y_marker_lines:
+            self._y_marker_lines.pop(line_name)
+            self._y_marker_line_colors.pop(line_name)
+
+            # rescale the y axis
+            if self._scale_y_range():
+                self.rescaled_y.emit()
+
+            # update the screen
+            self.update()
+
+    """
+       Add lower alarm level
+    """
+    def add_lower_alarm_level(self, marker_name: str, y_pos: float, marker_color: QtGui.QColor = ICDisplayConfig.DefaultPlotYMarkerColor) -> None:
+        self._lower_alarm_level_name = marker_name
+        self.add_y_marker(marker_name, y_pos, marker_color)
+
+    """
+        Remove lower alarm level
+    """
+    def remove_lower_alarm_level(self, line_name: str) -> None:
+        self._lower_alarm_level_name = ""
+        self.remove_y_marker_line(line_name)
+
+    """
+       Add upper alarm level
+    """
+    def add_upper_alarm_level(self, marker_name: str, y_pos: float, marker_color: QtGui.QColor = ICDisplayConfig.DefaultPlotYMarkerColor) -> None:
+        self._upper_alarm_level_name = marker_name
+        self.add_y_marker(marker_name, y_pos, marker_color)
+
+    """
+        Remove lower alarm level
+    """
+    def remove_upper_alarm_level(self, line_name: str) -> None:
+        self._upper_alarm_level_name = ""
+        self.remove_y_marker_line(line_name)
 
     """
        Add range lines to the plot window
     """
-    def add_x_marker(self, marker_name: str, x_pos: float,
-                     marker_color: QtGui.QColor = ICDisplayConfig.DefaultPlotXMarkerColor) -> None:
+    def add_x_marker(self, marker_name: str, x_pos: float, marker_color: QtGui.QColor = ICDisplayConfig.DefaultPlotXMarkerColor) -> None:
         self._x_marker_lines[marker_name] = x_pos
         self._x_marker_line_colors[marker_name] = marker_color
 
-        # readjust the auto scale limits
-        self._scale_x_max = self._scale_x_max if (self._scale_x_max > x_pos) else x_pos
-        self._scale_x_min = self._scale_x_min if (self._scale_x_min < x_pos) else x_pos
+        # rescale the x axis and notify others about x axis rescaling
+        if self._scale_display_x(True):
+            self.rescaled_x.emit()
 
         # update the screen
         self.update()
+
+    """
+       Remove X range lines to the plot window
+    """
+    def remove_x_marker(self, marker_name: str, rescale_display: bool = False):
+        if marker_name in self._x_marker_lines:
+            self._x_marker_lines.pop(marker_name)
+            self._x_marker_line_colors.pop(marker_name)
+
+            # rescale the x axis display
+            if self._scale_display_x(rescale_display):
+                self.rescaled_x.emit()
+
+            # update the screen
+            self.update()
 
     """
         Check if a particular line name exists
@@ -416,44 +650,38 @@ class ICGraph(ICBaseWidget):
         Set Y range for plots where the plots are not auto scaled
         For plots that are auto scaled the limits provide the limit
         for the scaling. The limits can be numbers specifying the limit 
-        defined by [ymin, ymax]. The limits can also be in form of 
+        defined by [y_min, y_max]. The limits can also be in form of 
         a list which specifies the range of the limit. 
-        ymin = [ymin_min, ymin_max]
-        ymax = [ymax_min, ymax_max]
+        y_min = [y_min_min, y_min_max]
+        y_max = [y_max_min, y_max_max]
     """
     def set_y_auto_scale_limits(self, y_min: Union[float, list[float]], y_max: Union[float, list[float]]) -> None:
-        # convert both ymax and ymin to list
+        # convert both y_max and y_min to list
         if not isinstance(y_max, list):
             y_max = [y_max, y_max]
         if not isinstance(y_min, list):
             y_min = [y_min, y_min]
 
-        # sort the ymax range
+        # sort the y_max range
         y_max.sort()
         y_min.sort()
 
-        # ymax should be larger than ymin
+        # y_max should be larger than y_min
         if y_max[0] < y_min[1]:
             return
 
         # set the largest range if autoscaling is not active
         if not self._auto_scale:
-            self._scale_y_max = y_max[1]  # maximum of ymax
-            self._scale_y_min = y_min[0]  # minimum of ymin
+            self._scale_y_max = y_max[1]  # maximum of y_max
+            self._scale_y_min = y_min[0]  # minimum of y_min
 
         # set the limit ranges to match the min and max
         self._auto_scale_y_max_limit = y_max
         self._auto_scale_y_min_limit = y_min
 
         # perform scaling
-        self._scale_y_range()
-
-    """
-        Set the default value
-    """
-    def set_default_value(self, y_def: float) -> None:
-        self._default_level = y_def
-        self.update()
+        if self._scale_y_range():
+            self.rescaled_y.emit()
 
     ###################################################
     #    Override base class event handlers
@@ -462,287 +690,263 @@ class ICGraph(ICBaseWidget):
         if event.button() & Qt.LeftButton:
             # find the current position in data coordinates
             painter = QtGui.QPainter(self)
-            tmp_hght = painter.device().height()
-            tmp_wdth = painter.device().width()
-            # canvas points
-            xmin = self.SCREEN_X_LEFT_GUTTER
-            xmax = tmp_wdth - self.SCREEN_X_RIGHT_GUTTER
-            ymin = self.SCREEN_Y_TOP_GUTTER
-            if self._xtick_label:
-                ymax = tmp_hght - self.SCREEN_Y_BOTTOM_GUTTER_LBL
-            else:
-                ymax = tmp_hght - self.SCREEN_Y_BOTTOM_GUTTER_NOLBL
-            add_gapy = (self._ymax - self._ymin) * DisplayConfig.PlotBufferSpace
-            x_scale = (float(xmax - xmin)) / (float(self._disp_xmax - self._disp_xmin))
-            y_scale = (float(ymin - ymax)) / (float((self._ymax + add_gapy) - (self._ymin - add_gapy)))
+            temp_height = painter.device().height()
+            temp_width = painter.device().width()
+
+            # screen to world scaling factors
+            x_scale = (float(self._display_x_max - self._display_x_min)) / (float(temp_width))
+            y_scale = (float(self._scale_y_max - self._scale_y_min)) / (float(temp_height))
+
             # position in world scales
-            real_pos_x = self._disp_xmin + (event.pos().x() - xmin) / x_scale
-            real_pos_y = (self._ymin - add_gapy) + (event.pos().y() - ymin) / y_scale
-            for line_name in self._plot_xdata:
+            real_pos_x = self._display_x_min + event.pos().x() * x_scale
+            real_pos_y = self._scale_y_min + (temp_height - event.pos().y()) * y_scale
+
+            for line_name in self._plot_x_data:
                 # for each line find the closest point in the graph
-                xarr = self._plot_xdata[line_name]
-                yarr = self._plot_ydata[line_name]
-                if xarr.size == 0 or yarr.size == 0:
+                x_array = self._plot_x_data[line_name]
+                y_array = self._plot_y_data[line_name]
+
+                if x_array.size == 0 or y_array.size == 0:
                     continue
-                dist = (xarr - real_pos_x)**2 + (yarr - real_pos_y)**2
+
+                dist = (x_array - real_pos_x)**2 + (y_array - real_pos_y)**2
                 min_index = np.argmin(dist)
+
                 self._selected_index[line_name] = min_index
-                self.clicked.emit(self._name, line_name, min_index, xarr[min_index], yarr[min_index])
+                self.clicked.emit(self._name, line_name, min_index, x_array[min_index], y_array[min_index])
+
             self.update()
+
+    """
+        Wheel motion zooms in and out
+    """
+    def on_wheel_rotated(self, event: QtGui.QWheelEvent) -> None:
+        # find the current position in data coordinates
+        painter = QtGui.QPainter(self)
+        temp_width = painter.device().width()
+
+        x_scale = float(self._display_x_max - self._display_x_min) / float(temp_width)
+        cur_pos_x = self._display_x_min + event.pos().x() * x_scale
+        mid_x = 0.5 * (self._display_x_max + self._display_x_min)
+
+        # calculate the new display window width
+        num_steps = event.angleDelta().y() / 120
+
+        if num_steps > 0:
+            # zoom in based on cursor location
+            wnd_x = 0.25 * (self._display_x_max - self._display_x_min)
+        else:
+            # zoom out based on cursor location
+            wnd_x = self._display_x_max - self._display_x_min
+
+        # change the display window based on position
+        if cur_pos_x < mid_x:
+            new_left_x = cur_pos_x - wnd_x
+
+            if new_left_x < self._scale_x_min:
+                wnd_x += self._scale_x_min - new_left_x
+                new_left_x = self._scale_x_min
+
+            self._display_x_min = new_left_x
+
+            new_right_x = cur_pos_x + wnd_x
+            self._display_x_max = new_right_x if new_right_x < self._scale_x_max else self._scale_x_max
+        else:
+            new_right_x = cur_pos_x + wnd_x
+
+            if new_right_x > self._scale_x_max:
+                wnd_x += new_right_x - self._scale_x_max
+                new_right_x = self._scale_x_max
+
+            self._display_x_max = new_right_x
+
+            new_left_x = cur_pos_x - wnd_x
+            self._display_x_min = new_left_x if new_left_x > self._scale_x_min else self._scale_x_min
+
+        # notify others of the zoom
+        self.rescaled_x.emit()
+
+        # update the view
+        self.update()
 
     ###################################################
     #    Override event handlers
     ###################################################
     """
-        Wheel motion zooms in and out
-    """
-    def wheelEvent(self, event):
-        # find the current position in data coordinates
-        painter = QtGui.QPainter(self)
-        tmp_wdth = painter.device().width()
-        x_scale = float(tmp_wdth - (self.SCREEN_X_LEFT_GUTTER + self.SCREEN_X_RIGHT_GUTTER)) / float(self._disp_xmax - self._disp_xmin)
-        cur_pos_x = self._disp_xmin + (event.pos().x() - self.SCREEN_X_LEFT_GUTTER) / x_scale
-        mid_x = 0.5 * (self._disp_xmax + self._disp_xmin)
-        # calculate the new display window width
-        numSteps = event.angleDelta().y() / 120
-        if numSteps > 0:
-            # zoom in based on cursor location
-            wnd_x = 0.25 * (self._disp_xmax - self._disp_xmin)
-        else:
-            # zoom out based on cursor location
-            wnd_x = self._disp_xmax - self._disp_xmin
-        # change the display window based on position
-        if cur_pos_x < mid_x:
-            new_left_x = cur_pos_x - wnd_x
-            if new_left_x < self._xmin:
-                wnd_x += self._xmin - new_left_x
-                new_left_x = self._xmin
-            self._disp_xmin = new_left_x
-            new_right_x = cur_pos_x + wnd_x
-            self._disp_xmax = new_right_x if new_right_x < self._xmax else self._xmax
-        else:
-            new_right_x = cur_pos_x + wnd_x
-            if new_right_x > self._xmax:
-                wnd_x += new_right_x - self._xmax
-                new_right_x = self._xmax
-            self._disp_xmax = new_right_x
-            new_left_x = cur_pos_x - wnd_x
-            self._disp_xmin = new_left_x if new_left_x > self._xmin else self._xmin
-        self.update()
-
-    """
         Draw the plot
     """
     def paintEvent(self, e):
+        if self.state in (ICWidgetState.Hidden, ICWidgetState.Transparent):
+            return
+
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
 
         # window dimensions
-        tmp_wdth = painter.device().width()
-        tmp_hght = painter.device().height()
+        temp_width = painter.device().width()
+        temp_height = painter.device().height()
 
-        # setup the pen
-        pen = QtGui.QPen(QtGui.QColor(self._line_color))
+        # fix y limits for auto scale
+        if self._scale_y_max == self._scale_y_min:
+            self._scale_y_max += 1.0
+            self._scale_y_min -= 1.0
+
+        # world to screen scaling factors
+        x_scale = (float(temp_width)) / (float(self._display_x_max - self._display_x_min))
+        y_scale = (float(temp_height)) / (float(self._scale_y_max - self._scale_y_min))
+
+        # calculate base level
+        base_level_y = temp_height - (self._base_level - self._scale_y_min) * y_scale
+
+        # normal pen
+        pen = QtGui.QPen()
         pen.setWidth(2)
         pen.setCapStyle(Qt.RoundCap)
         pen.setJoinStyle(Qt.RoundJoin)
-        painter.setPen(pen)
-        fnt = painter.font()
-        fnt.setPixelSize(DisplayConfig.GeneralTextSize)
-        painter.setFont(fnt)
-
-        # canvas points
-        xmin = self.SCREEN_X_LEFT_GUTTER
-        xmax = tmp_wdth - self.SCREEN_X_RIGHT_GUTTER
-        ymin = self.SCREEN_Y_TOP_GUTTER
-        if self._xtick_label:
-            ymax = tmp_hght - self.SCREEN_Y_BOTTOM_GUTTER_LBL
-        else:
-            ymax = tmp_hght - self.SCREEN_Y_BOTTOM_GUTTER_NOLBL
-        if (xmin >= xmax) or (ymin >= ymax):
-            return
-
-        # draw the main rect
-        rect = QtCore.QRectF(xmin, ymin, xmax-xmin, ymax-ymin)
-        painter.drawRect(rect)
-
-        # fix y limits for auto scale
-        if self._ymax == self._ymin:
-            self._ymax = 1.0
-            self._ymin = -1.0
-
-        #addnl_gapy = (self._ymax - self._ymin) * DisplayConfig.PlotBufferSpace
-        #self._ymax += addnl_gapy
-        #self._ymin -= addnl_gapy
-
-        x_scale = (float(xmax - xmin)) / (float(self._disp_xmax - self._disp_xmin))
-        y_scale = (float(ymin - ymax)) / (float(self._ymax - self._ymin))
-
-        # draw x ticks
-        num_gaps = np.floor((xmax - xmin) / 100.0)
-        num_gaps = 1 if num_gaps == 0 else num_gaps
-        real_gap = (self._disp_xmax - self._disp_xmin) / num_gaps
-        real_x = self._disp_xmin
-        while real_x <= self._disp_xmax:
-            # x position in pixels
-            curr_x = xmin + x_scale * (real_x - self._disp_xmin)
-            painter.drawLine(QtCore.QPointF(curr_x, ymax), QtCore.QPointF(curr_x, ymax+5))
-            if self._xtick_label:
-                if real_x == self._disp_xmin:
-                    rect = QtCore.QRect(int(curr_x), ymax+10, 60, DisplayConfig.GeneralTextSize + 5)
-                    painter.drawText(rect, Qt.AlignLeft, self.axis_label_format.format(real_x))
-                elif (real_x + real_gap) <= self._disp_xmax:
-                    rect = QtCore.QRect(int(curr_x)-25, ymax+10, 60, DisplayConfig.GeneralTextSize + 5)
-                    painter.drawText(rect, Qt.AlignHCenter, self.axis_label_format.format(real_x))
-                else:
-                    rect = QtCore.QRect(int(curr_x)-50, ymax+10, 60, DisplayConfig.GeneralTextSize + 5)
-                    painter.drawText(rect, Qt.AlignRight, self.axis_label_format.format(real_x))
-            real_x += real_gap
-
-        # draw y ticks
-        num_gaps = np.floor((ymax - ymin) / 100.0)
-        num_gaps = 1 if num_gaps == 0 else num_gaps
-        real_gap = (self._ymax - self._ymin) / num_gaps
-        real_y = self._ymax
-        while real_y >= self._ymin:
-            curr_y = ymax + y_scale * (real_y - self._ymin)
-            painter.drawLine(QtCore.QPointF(xmin, curr_y), QtCore.QPointF(xmin-5, curr_y))
-            if self._ytick_label:
-                if real_y == self._ymin:
-                    rect = QtCore.QRect(0, int(curr_y)-20, 60, DisplayConfig.GeneralTextSize + 5)
-                    painter.drawText(rect, Qt.AlignRight, self.axis_label_format.format(real_y))
-                elif (real_y - real_gap) >= self._ymin:
-                    rect = QtCore.QRect(0, int(curr_y)-10, 60, DisplayConfig.GeneralTextSize + 5)
-                    painter.drawText(rect, Qt.AlignRight, self.axis_label_format.format(real_y))
-                else:
-                    rect = QtCore.QRect(0, int(curr_y), 60, DisplayConfig.GeneralTextSize + 5)
-                    painter.drawText(rect, Qt.AlignRight, self.axis_label_format.format(real_y))
-            real_y -= real_gap
-
-        # draw y limit lines
-        for limit_name in self._ylimits:
-            pen = QtGui.QPen(QtGui.QColor(self._ylimit_clr[limit_name]))
-            pen.setStyle(Qt.DashDotLine)
-            pen.setWidth(2)
-            pen.setCapStyle(Qt.RoundCap)
-            pen.setJoinStyle(Qt.RoundJoin)
-            painter.setPen(pen)
-            ypos = ymax + (self._ylimits[limit_name] - self._ymin) * y_scale
-            painter.drawLine(QtCore.QPointF(xmin, ypos), QtCore.QPointF(xmax, ypos))
-            rect = QtCore.QRect(0, ypos - 0.5*(DisplayConfig.GeneralTextSize + 5), 40, DisplayConfig.GeneralTextSize + 5)
-            painter.drawText(rect, Qt.AlignRight, limit_name)
-
-        # draw x range lines
-        for range_name in self._xranges:
-            x_world = self._xranges[range_name]
-            if self._disp_xmin < x_world < self._disp_xmax:
-                pen = QtGui.QPen(QtGui.QColor(self._xrange_clr[range_name]))
-                pen.setStyle(Qt.DashDotLine)
-                pen.setWidth(2)
-                pen.setCapStyle(Qt.RoundCap)
-                pen.setJoinStyle(Qt.RoundJoin)
-                painter.setPen(pen)
-                xpos = xmin + (x_world - self._disp_xmin) * x_scale
-                painter.drawLine(QtCore.QPointF(xpos, ymin), QtCore.QPointF(xpos, ymax))
 
         # selected pen
-        selected_pen = QtGui.QPen(QtGui.QColor('#FF3333'))
+        selected_pen = QtGui.QPen(self._selected_color)
         selected_pen.setWidth(2)
         selected_pen.setCapStyle(Qt.RoundCap)
         selected_pen.setJoinStyle(Qt.RoundJoin)
 
         # draw the lines
-        for line_name in self._plot_xdata:
-            xarr = self._plot_xdata[line_name]
-            yarr = self._plot_ydata[line_name]
-            # if there is selected point
-            sel_indx = -1
-            if line_name in self._selected_index:
-                painter.setPen(selected_pen)
-                # plot the circle
-                sel_indx = self._selected_index[line_name]
-                px = xmin + (xarr[sel_indx] - self._disp_xmin) * x_scale
-                py = ymax + (yarr[sel_indx] - self._ymin) * y_scale
-                if (py < ymax - 4) and (py > ymin + 4) and (px < xmax - 4) and (px > xmin + 4):
-                    painter.drawEllipse(QtCore.QPointF(px, py), 3, 3)
+        for line_name in self._plot_x_data:
+            x_array = self._plot_x_data[line_name]
+            y_array = self._plot_y_data[line_name]
+
             # draw the main plot
             path = QtGui.QPainterPath()
-            path.moveTo(xmin, ymax)
+            if line_name in self._plot_fill_color:
+                path.setFillRule(Qt.WindingFill)
+                brush = QtGui.QBrush(self._plot_fill_color[line_name])
+                painter.setBrush(brush)
+
             # normal pen
-            pen = QtGui.QPen(QtGui.QColor(self._plot_clrs[line_name]))
-            pen.setWidth(2)
-            pen.setCapStyle(Qt.RoundCap)
-            pen.setJoinStyle(Qt.RoundJoin)
+            pen.setColor(self._plot_line_color[line_name])
+
+            # if there is selected point
+            selected_index = -1
+            if line_name in self._selected_index:
+                selected_index = self._selected_index[line_name]
+
             if self._plot_is_line[line_name]:
                 pen.setStyle(self._plot_style[line_name])
                 painter.setPen(pen)
                 skip = True
-                for i, x in enumerate(xarr):
-                    y = yarr[i]
-                    px = xmin + (x - self._disp_xmin) * x_scale
-                    py = ymax + (y - self._ymin) * y_scale
-                    if skip or (py >= ymax-2) or (py <= ymin+2) or (px >= xmax-2) or (px <= xmin+2):
-                        path.moveTo(px, py)
-                        skip = False
+                last_x = 0
+                for i, x in enumerate(x_array):
+                    y = y_array[i]
+                    px = (x - self._display_x_min) * x_scale
+                    py = temp_height - (y - self._scale_y_min) * y_scale
+
+                    # limit py to top and bottom
+                    py = py if py > 0 else 0
+                    py = py if py < temp_height else temp_height
+
+                    if 0 <= px <= temp_width:
+                        if skip:
+                            path.moveTo(px, base_level_y)
+                            path.lineTo(px, py)
+                            skip = False
+                        else:
+                            path.lineTo(px, py)
+                        last_x = px
+
                     else:
-                        path.lineTo(px, py)
+                        # close the loop
+                        path.lineTo(last_x, base_level_y)
+                        path.closeSubpath()
+
+                        # we start skipping till we get back in range
+                        skip = True
+
+                # if we were not skipping close the loop
+                if not skip:
+                    path.lineTo(last_x, base_level_y)
+                    path.closeSubpath()
             else:
+
                 painter.setPen(pen)
                 if self._plot_style[line_name] == "o":
                     # draw circles
-                    for i, x in enumerate(xarr):
-                        if i == sel_indx:
+                    for i, x in enumerate(x_array):
+                        # skip the selected point
+                        if i == selected_index:
                             continue
-                        y = yarr[i]
-                        px = xmin + (x - self._disp_xmin) * x_scale
-                        py = ymax + (y - self._ymin) * y_scale
-                        if (py < ymax-4) and (py > ymin+4) and (px < xmax-4) and (px > xmin+4):
+
+                        # calculate screen coordinates
+                        y = y_array[i]
+                        px = (x - self._display_x_min) * x_scale
+                        py = temp_height - (y - self._scale_y_min) * y_scale
+
+                        if (3 < py < temp_height-3) and (3 < px < temp_width-3):
                             path.addEllipse(QtCore.QPointF(px, py), 3, 3)
+
                 elif self._plot_style[line_name] == "r":
                     # draw rectangles
-                    for i, x in enumerate(xarr):
-                        if i == sel_indx:
+                    for i, x in enumerate(x_array):
+                        # skip the selected index
+                        if i == selected_index:
                             continue
-                        y = yarr[i]
-                        px = xmin + (x - self._disp_xmin) * x_scale
-                        py = ymax + (y - self._ymin) * y_scale
-                        if (py < ymax-4) and (py > ymin+4) and (px < xmax-4) and (px > xmin+4):
+
+                        # calculate screen coordinates
+                        y = y_array[i]
+                        px = (x - self._display_x_min) * x_scale
+                        py = temp_height - (y - self._scale_y_min) * y_scale
+
+                        if (3 < py < temp_height-3) and (3 < px < temp_width-3):
                             path.addRect(px - 3, py - 3, 6, 6)
+
                 elif self._plot_style[line_name] == "t":
                     # draw triangles
-                    for i, x in enumerate(xarr):
-                        if i == sel_indx:
+                    for i, x in enumerate(x_array):
+                        # skip the selected index
+                        if i == selected_index:
                             continue
-                        y = yarr[i]
-                        px = xmin + (x - self._disp_xmin) * x_scale
-                        py = ymax + (y - self._ymin) * y_scale
-                        if (py < ymax-4) and (py > ymin+4) and (px < xmax-4) and (px > xmin+4):
+
+                        # calculate screen coordinates
+                        y = y_array[i]
+                        px = (x - self._display_x_min) * x_scale
+                        py = temp_height - (y - self._scale_y_min) * y_scale
+
+                        if (3 < py < temp_height-3) and (3 < px < temp_width-3):
                             path.moveTo(px, py-3)
                             path.lineTo(px-3, py+3)
                             path.lineTo(px+3, py+3)
                             path.lineTo(px, py-3)
+
                 elif self._plot_style[line_name] == "+":
                     # draw +
-                    for i, x in enumerate(xarr):
-                        if i == sel_indx:
+                    for i, x in enumerate(x_array):
+                        # skip the selected index
+                        if i == selected_index:
                             continue
-                        y = yarr[i]
-                        px = xmin + (x - self._disp_xmin) * x_scale
-                        py = ymax + (y - self._ymin) * y_scale
-                        if (py < ymax-4) and (py > ymin+4) and (px < xmax-4) and (px > xmin+4):
+
+                        # calculate screen coordinates
+                        y = y_array[i]
+                        px = (x - self._display_x_min) * x_scale
+                        py = temp_height - (y - self._scale_y_min) * y_scale
+
+                        if (3 < py < temp_height-3) and (3 < px < temp_width-3):
                             path.moveTo(px, py-3)
                             path.lineTo(px, py+3)
                             path.moveTo(px-3, py)
                             path.lineTo(px+3, py)
+
                 elif self._plot_style[line_name] == "*":
                     # draw *
-                    for i, x in enumerate(xarr):
-                        if i == sel_indx:
+                    for i, x in enumerate(x_array):
+                        # skip the selected index
+                        if i == selected_index:
                             continue
-                        y = yarr[i]
-                        px = xmin + (x - self._disp_xmin) * x_scale
-                        py = ymax + (y - self._ymin) * y_scale
-                        if (py < ymax-4) and (py > ymin+4) and (px < xmax-4) and (px > xmin+4):
+
+                        # calculate screen coordinates
+                        y = y_array[i]
+                        px = (x - self._display_x_min) * x_scale
+                        py = temp_height - (y - self._scale_y_min) * y_scale
+
+                        if (3 < py < temp_height-3) and (3 < px < temp_width-3):
                             path.moveTo(px, py)
                             path.lineTo(px, py-3)
                             path.moveTo(px, py)
@@ -753,116 +957,255 @@ class ICGraph(ICBaseWidget):
                             path.lineTo(px+3, py+3)
                             path.moveTo(px, py)
                             path.lineTo(px-3, py+3)
+
                 else:
                     # draw x
-                    for i, x in enumerate(xarr):
-                        if i == sel_indx:
+                    for i, x in enumerate(x_array):
+                        # skip the selected index
+                        if i == selected_index:
                             continue
-                        y = yarr[i]
-                        px = xmin + (x - self._disp_xmin) * x_scale
-                        py = ymax + (y - self._ymin) * y_scale
-                        if (py < ymax-4) and (py > ymin+4) and (px < xmax-4) and (px > xmin+4):
+
+                        # calculate screen coordinates
+                        y = y_array[i]
+                        px = (x - self._display_x_min) * x_scale
+                        py = temp_height - (y - self._scale_y_min) * y_scale
+
+                        if (3 < py < temp_height-3) and (3 < px < temp_width-3):
                             path.moveTo(px-3, py-3)
                             path.lineTo(px+3, py+3)
                             path.moveTo(px-3, py+3)
                             path.lineTo(px+3, py-3)
-            painter.drawPath(path)        
 
-        # fix the changes in _y max and _y min
-        #self._ymax -= addnl_gapy
-        #self._ymin += addnl_gapy
+            # draw the line
+            painter.drawPath(path)
 
-        # add label
-        fnt = painter.font()
-        fnt.setPixelSize(DisplayConfig.LabelTextSize)
-        painter.setFont(fnt)
-        rect = QtCore.QRect(-30, -15, 60, 30)
-        painter.save()
-        painter.translate(xmax+10.0, tmp_hght/2.0)
-        painter.rotate(90)
-        painter.drawText(rect, Qt.AlignHCenter, self._name)
-        painter.rotate(-90)
-        painter.translate(-xmax-10.0, -tmp_hght/2.0)
-        painter.restore()
+            # draw the selected point
+            if selected_index != -1:
+                painter.setPen(selected_pen)
+
+                # plot the circle
+                px = (x_array[selected_index] - self._display_x_min) * x_scale
+                py = temp_height - (y_array[selected_index] - self._scale_y_min) * y_scale
+
+                if (3 < py < temp_height-3) and (3 < px < temp_width-3):
+                    painter.drawEllipse(QtCore.QPointF(px, py), 3, 3)
+
+        # setup the pen
+        pen = QtGui.QPen()
+        pen.setStyle(Qt.DashDotLine)
+        pen.setWidth(2)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+
+        # draw y limit lines
+        for marker_name in self._y_marker_lines:
+            pen.setColor(self._y_marker_line_colors[marker_name])
+            painter.setPen(pen)
+            y_pos = temp_height - (self._y_marker_lines[marker_name] - self._scale_y_min) * y_scale
+            painter.drawLine(QtCore.QPointF(0, y_pos), QtCore.QPointF(temp_width, y_pos))
+
+            y_text_pos = y_pos - (ICDisplayConfig.GeneralTextSize + 5)
+            if y_text_pos < 0:
+                y_text_pos = y_pos + (ICDisplayConfig.GeneralTextSize + 5)
+
+            rect = QtCore.QRectF(0, y_text_pos, 60, ICDisplayConfig.GeneralTextSize + 5)
+            painter.drawText(rect, Qt.AlignLeft, marker_name)
+
+        # draw the base line
+        pen.setColor(ICDisplayConfig.LinearGaugeRulerColor)
+        painter.setPen(pen)
+        y_pos = temp_height - (self._base_level - self._scale_y_min) * y_scale
+        painter.drawLine(QtCore.QPointF(0, y_pos), QtCore.QPointF(temp_width, y_pos))
+
+        # draw x range lines
+        for marker_name in self._x_marker_lines:
+            x_world = self._x_marker_lines[marker_name]
+            if self._display_x_min < x_world < self._display_x_max:
+                pen.setColor(self._x_marker_line_colors[marker_name])
+                painter.setPen(pen)
+                x_pos = (x_world - self._display_x_min) * x_scale
+                painter.drawLine(QtCore.QPointF(x_pos, 0), QtCore.QPointF(x_pos, temp_height))
+
+                x_text_pos = x_pos + 3
+                align = Qt.AlignLeft
+                if x_text_pos + 60 > temp_width:
+                    x_text_pos = x_text_pos - 63
+                    align = Qt.AlignRight
+
+                rect = QtCore.QRectF(x_text_pos, 3, 60, ICDisplayConfig.GeneralTextSize + 5)
+                painter.drawText(rect, align, marker_name)
 
 
-class ICPlotWidget(ICBaseWidget):
-    clicked = pyqtSignal(str, str, int, float, float)
+class ICPlotWidget(ICLinearAxisContainer):
+    """
+        Container class for plots
+    """
     
-    def __init__(self, rows, cols, names, parent=None, autoscale=True, facecolor='#1C2833', linecolor='#FFEE58',
-                 *args, **kwargs):
-        super(PSPlotWidget, self).__init__(parent, *args, **kwargs)
-        # plots dictionary
-        self.py_plots = {}
-        self._ring_index = 0
-        # main layout
-        self.layout = QtWidgets.QGridLayout()
-        row_num = 0
-        col_num = 0
-        for indx, nam in enumerate(names):
-            self.py_plots[nam] = _PSGraph(nam, self, autoscale, facecolor, linecolor)
-            self.py_plots[nam].clicked.connect(self.onClicked)
-            self.layout.addWidget(self.py_plots[nam], row_num, col_num, 1, 1)
-            col_num += 1
-            if col_num == cols:
-                row_num += 1
-                col_num = 0
-        self.setLayout(self.layout)
+    def __init__(self, name: str, unit: str, auto_scale=True, show_y_axis: bool = True, display_steps_y: int = 4,
+                 show_x_axis: bool = True, display_steps_x: int = 4, show_title: bool = True, show_value: bool = True, widget_id: int = 0, *args, **kwargs):
+
+        if (not show_value) and (not show_value):
+            cont_type = ICLinearContainerType.PLOT_NO_TITLE_NO_VALUE
+        elif not show_value:
+            cont_type = ICLinearContainerType.PLOT_NO_VALUE
+        elif not show_title:
+            cont_type = ICLinearContainerType.PLOT_NO_TITLE
+        else:
+            cont_type = ICLinearContainerType.PLOT
+
+        super(ICPlotWidget, self).__init__(cont_type, widget_id, *args, **kwargs)
+
+        # title and unit
+        self.title = name
+        self.unit = unit
+
+        # local parameters
+        self._show_y_axis = show_y_axis
+        self._display_steps_y = display_steps_y
+
+        self._show_x_axis = show_x_axis
+        self._display_steps_x = display_steps_x
+
+        # the plot window
+        self._plot = ICGraph(name, auto_scale)
+        self._plot.current_changed[float].connect(self.value_changed)
+        self._plot.rescaled_x.connect(self.update_x_axis)
+        self._plot.rescaled_y.connect(self.update_y_axis)
+        self.add_central_widget(self._plot)
 
         # display parameters
-        self.setSizePolicy(
-            QtWidgets.QSizePolicy.MinimumExpanding,
-            QtWidgets.QSizePolicy.MinimumExpanding
-        )
-        
-    @pyqtSlot(str, str, int, float, float)
-    def onClicked(self, plot_name, line_name, index, x_pos, y_pos):
-        self.clicked.emit(plot_name, line_name, index, x_pos, y_pos)
+        self.on_layout_update()
 
-    def sizeHint(self):
-        return QtCore.QSize(DisplayConfig.PlotWidth, DisplayConfig.PlotHeight)
-    
-    def minimumSizeHint(self):
-        return QtCore.QSize(DisplayConfig.PlotWidth, DisplayConfig.PlotHeight)
+        # display parameters
+        self.setSizePolicy(QtWidgets.QSizePolicy.MinimumExpanding, QtWidgets.QSizePolicy.MinimumExpanding)
 
-    """
-        update multiple plot lines
-    """
-    def updateDataSet(self, plot_names, line_names, data):
-        for index, name in enumerate(plot_names):
-            plot = self.py_plots[name]
-            plot.updateData(line_names[index], data[index])
+    ########################################################
+    # properties
+    ########################################################
+    @property
+    def graph(self) -> ICGraph:
+        return self._plot
 
-    """
-        update and redraw all included plots
-    """
-    def update(self):
-        for name in self.py_plots:
-            plot = self.py_plots[name]
-            plot.update()
+    @property
+    def show_x_axis(self) -> bool:
+        return self._show_x_axis
 
-    """
-        Function for plotting continuous animated plots
-    """
-    def pushDataSet(self, plot_names, line_names, datas):
-        # check the index
-        plot = self.py_plots[plot_names[0]]
-        data_len = plot._plot_xdata[line_names[0]].size
-        if self._ring_index == data_len:
-            self._ring_index = 0
-        # set the next index point
-        nxt_indx = (self._ring_index + 5) % data_len
-        # change the datapoint
-        for indx, name in enumerate(plot_names):
-            plot = self.py_plots[name]
-            line = plot._plot_ydata[line_names[indx]]
-            line[self._ring_index] = datas[indx]
-            if plot._autoscale:
-                if self._ring_index == 0:
-                    plot._scaleYRange()
-                else:
-                    plot._ymax = plot._ymax if (plot._ymax > datas[indx]) else datas[indx]
-                    plot._ymin = plot._ymin if (plot._ymin < datas[indx]) else datas[indx]
-            # remove the next point
-            line[nxt_indx] = plot._def_level    
-        self._ring_index += 1
+    @show_x_axis.setter
+    def show_x_axis(self, sa: bool) -> None:
+        # proceed only if teh status is different from before
+        if sa == self._show_x_axis:
+            return
+
+        self._show_x_axis = sa
+
+        # if true then create the scale bar
+        if self._show_x_axis:
+            if self.scale_bar_one is None:
+                max_val = self.plot.display_x_max
+                min_val = self.plot.display_x_min
+                scale_values, scale_displayed_values = ICLinearAxis.create_ticks(max_val, min_val, self._display_steps_x, "{0:.0f}")
+                self.add_first_scale_bar("", scale_values, scale_displayed_values, ICWidgetPosition.Bottom)
+        else:
+            # if false then remove scale bar
+            if self.scale_bar_one is not None:
+                index = self._layout.indexOf(self.scale_bar_one)
+                if index >= 0:
+                    _ = self._layout.takeAt(index)
+                self.scale_bar_one = None
+                self._update_layout()
+
+    @property
+    def show_y_axis(self) -> bool:
+        return self._show_y_axis
+
+    @show_y_axis.setter
+    def show_y_axis(self, sa: bool) -> None:
+        # proceed only if teh status is different from before
+        if sa == self._show_y_axis:
+            return
+
+        self._show_y_axis = sa
+
+        # if true then create the scale bar
+        if self._show_y_axis:
+            if self.scale_bar_two is None:
+                max_val = self._plot.display_y_max
+                min_val = self._plot.display_y_min
+                scale_values, scale_displayed_values = ICLinearAxis.create_ticks(max_val, min_val, self._display_steps_x, "{0:.0f}")
+                self.add_second_scale_bar("", scale_values, scale_displayed_values, ICWidgetPosition.Left)
+        else:
+            # if false then remove scale bar
+            if self.scale_bar_one is not None:
+                index = self._layout.indexOf(self.scale_bar_one)
+                if index >= 0:
+                    _ = self._layout.takeAt(index)
+                self.scale_bar_one = None
+                self._update_layout()
+
+    ########################################################
+    # functions
+    ########################################################
+
+    ########################################################
+    # slots
+    ########################################################
+    # handles the signal for value update
+    def update_x_axis(self) -> None:
+        if not self._show_x_axis:
+            return
+
+        max_val = self._plot.display_x_max
+        min_val = self._plot.display_x_min
+        # if scale bar is not present then create it otherwise update
+        if self.scale_bar_one is None:
+            scale_values, scale_displayed_values = ICLinearAxis.create_ticks(max_val, min_val, self._display_steps_x, "{0:.0f}")
+            self.add_first_scale_bar("", scale_values, scale_displayed_values, ICWidgetPosition.Bottom)
+        else:
+            self.scale_bar_one.update_ticks(max_val, min_val)
+
+    def update_y_axis(self) -> None:
+        if not self._show_y_axis:
+            return
+
+        max_val = self._plot.display_y_max
+        min_val = self._plot.display_y_min
+        # if scale bar is not present then create it otherwise update
+        if self.scale_bar_two is None:
+            scale_values, scale_displayed_values = ICLinearAxis.create_ticks(max_val, min_val, self._display_steps_y, "{0:.0f}")
+            self.add_second_scale_bar("", scale_values, scale_displayed_values, ICWidgetPosition.Left)
+        else:
+            self.scale_bar_two.update_ticks(max_val, min_val)
+
+    ########################################################
+    # base class event overrides
+    ########################################################
+    # change layout based on the orientation
+    def on_layout_update(self) -> None:
+        plot_width = ICDisplayConfig.PlotWidth
+        plot_height = ICDisplayConfig.PlotHeight
+
+        if self.scale_bar_one is not None:
+            scale_height = self.scale_bar_one.estimate_max_scale_width()
+        else:
+            scale_height = 0
+
+        if self.scale_bar_two is not None:
+            scale_width = self.scale_bar_two.estimate_max_scale_width()
+        else:
+            scale_width = 0
+
+        self._plot.size_hint = (plot_width + scale_width, plot_height + scale_height)
+        self.size_hint = (plot_width + scale_width, plot_height + scale_height + 50)
+
+        if self.scale_bar_one is not None:
+            self.scale_bar_one.size_hint = (plot_width, scale_height)
+
+        if self.scale_bar_two is not None:
+            self.scale_bar_two.size_hint = (scale_width, plot_height)
+
+    ########################################################
+    # event handlers
+    ########################################################
+    # override the default show event
+    def showEvent(self, e):
+        self.on_layout_update()

@@ -7,8 +7,8 @@ Created on May 18 2021
 This is a simple basic button
 """
 
-from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
+from PyQt5 import QtCore, QtGui
+from PyQt5.QtCore import Qt, pyqtSignal
 from .display_config import ICDisplayConfig
 from .base_widget import ICBaseWidget, ICWidgetState
 
@@ -77,24 +77,24 @@ class ICBasicButton(ICBaseWidget):
 
     # get the light and dark shades used to render the button
     @property
-    def button_colors(self) -> [QtGui.QColor, QtGui.QColor]:
-        return [self._button_color_light, self._button_color_dark]
+    def button_colors(self) -> tuple[QtGui.QColor, QtGui.QColor]:
+        return self._button_color_light, self._button_color_dark
 
     # set the light and dark shades used to render the button
     @button_colors.setter
-    def button_colors(self, colors: [QtGui.QColor, QtGui.QColor]) -> None:
+    def button_colors(self, colors: tuple[QtGui.QColor, QtGui.QColor]) -> None:
         self._button_color_light = colors[0]
         self._button_color_dark = colors[1]
         self.update()
 
     # get the colors used for enabled and disabled text
     @property
-    def text_colors(self) -> [QtGui.QColor, QtGui.QColor]:
+    def text_colors(self) -> tuple[QtGui.QColor, QtGui.QColor]:
         return self._text_color_enabled, self._text_color_disabled
 
     # set the colors used for enabled and disabled text
     @text_colors.setter
-    def text_colors(self, colors: [QtGui.QColor, QtGui.QColor]) -> None:
+    def text_colors(self, colors: tuple[QtGui.QColor, QtGui.QColor]) -> None:
         self._text_color_enabled = colors[0]
         self._text_color_disabled = colors[1]
         self.update()
@@ -114,7 +114,7 @@ class ICBasicButton(ICBaseWidget):
             # switch back to raised colors
             self.button_colors = (ICDisplayConfig.ButtonColorLightRaised, ICDisplayConfig.ButtonColorDarkRaised)
             # append user event to the history
-            self.append_history("", 0)
+            self.append_history("clicked", 0)
             self.clicked.emit(self._name, self._widget_id)
 
     ########################################################
@@ -127,17 +127,17 @@ class ICBasicButton(ICBaseWidget):
         self.redraw(painter)
 
     # function to draw the button
-    def redraw(self, painter: QtGui.QPainter) -> None:
+    def redraw(self, painter: QtGui.QPainter, vertical_offset: float = 0) -> None:
         # if the button is hidden then there is nothing to draw
         if self._state == ICWidgetState.Hidden:
             return
 
         # the size of the button is determined by the size of the widget
-        tmp_wdth = painter.device().width()
-        tmp_hght = painter.device().height()
+        tmp_width = painter.device().width()
+        tmp_height = painter.device().height()
 
         # define the rectangle to draw the button
-        rect = QtCore.QRectF(5, 5, tmp_wdth - 10, tmp_hght - 10)
+        rect = QtCore.QRectF(5, 5, tmp_width - 10, tmp_height - 10)
 
         # a linear gradient brush is used to fill the button
         brush = QtGui.QLinearGradient(rect.topRight(), rect.bottomRight())
@@ -189,5 +189,5 @@ class ICBasicButton(ICBaseWidget):
             painter.setPen(pen)
 
             # draw the text
-            rect = QtCore.QRect(10, tmp_hght / 2 - 0.5 * (self._text_size + 5), tmp_wdth - 20, self._text_size + 5)
+            rect = QtCore.QRectF(10, tmp_height / 2 - 0.5 * (self._text_size + 5) + vertical_offset, tmp_width - 20, self._text_size + 5)
             painter.drawText(rect, Qt.AlignCenter, str(self._name))

@@ -9,21 +9,36 @@ This displays a name value pair for a parameter.
 """
 
 from PyQt5 import QtCore, QtGui
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer, pyqtSlot
+from typing import Union
+from enum import Enum
+from datetime import datetime
 from .display_config import ICDisplayConfig
 from .base_widget import ICBaseWidget, ICWidgetState
 
 
+class ICTextLabelType(Enum):
+    LabelInteger = 0
+    LabelFloat = 1
+    LabelText = 2
+
+
 class ICTextLabel(ICBaseWidget):
     """
-    Basic text label class to display (name, value) pair
+        Basic text label class to display (name, value) pair
     """
-    def __init__(self, name: str, value: str, *args, **kwargs):
+    def __init__(self, name: str, value: Union[int, float, str], label_type: ICTextLabelType = ICTextLabelType.LabelText, *args, **kwargs):
         super(ICTextLabel, self).__init__(*args, **kwargs)
+
+        # internal variable of label type
+        self.__type: ICTextLabelType = label_type
 
         # name and value of the parameter to be displayed in the text label
         self._name: str = name
-        self._value: str = value
+        self._value: Union[int, float, str] = value
+
+        # format for the axis label
+        self._text_format = "{0:.0f}"
 
         # size of the text
         self._name_text_size: int = ICDisplayConfig.LabelNameSize
@@ -41,8 +56,8 @@ class ICTextLabel(ICBaseWidget):
         self._value_color: QtGui.QColor = ICDisplayConfig.LabelValueColor
 
         # sets the click-ability and focus-ability of the button
-        self.clickable = False
-        self.focusable = False
+        self.clickable = True
+        self.focusable = True
 
         # set size of the text label
         self.size_hint = (ICDisplayConfig.TextLabelWidth, ICDisplayConfig.TextLabelHeight)
@@ -63,17 +78,38 @@ class ICTextLabel(ICBaseWidget):
 
     # get the parameter value
     @property
-    def value(self) -> str:
+    def value(self) -> Union[int, float, str]:
         return self._value
 
     # update the parameter value
     @value.setter
-    def value(self, val: str) -> None:
-        self._value = val
-        if val.isnumeric():
-            self.append_history("", float(val))
-        else:
-            self.append_history(val, 0)
+    def value(self, val: Union[int, float, str]) -> None:
+        # strict type checking while setting
+        if self.__type == ICTextLabelType.LabelText:
+            self._value = str(val)
+            # add to the history and update the display
+            self.append_history(self._value, 0)
+            self.update()
+
+        elif (self.__type == ICTextLabelType.LabelInteger) and (type(val) in (int, float)):
+            self._value = int(val)
+            # add to the history and update the display
+            self.append_history("", float(self._value))
+            self.update()
+
+        elif type(val) in (int, float):
+            self._value = float(val)
+            # add to the history and update the display
+            self.append_history("", self._value)
+            self.update()
+
+    # text format to convert float to str
+    def text_format(self) -> str:
+        return self._text_format
+
+    # set text format
+    def text_format(self, fmt_str: str) -> None:
+        self._text_format = fmt_str
         self.update()
 
     # get the text size for name
@@ -100,12 +136,12 @@ class ICTextLabel(ICBaseWidget):
 
     # get the light and dark shades of the background color
     @property
-    def label_colors(self) -> [QtGui.QColor, QtGui.QColor]:
+    def label_colors(self) -> tuple[QtGui.QColor, QtGui.QColor]:
         return self._label_color_light, self._label_color_dark
 
     # set the light and dark shades of the background color
     @label_colors.setter
-    def label_colors(self, color: [QtGui.QColor, QtGui.QColor]) -> None:
+    def label_colors(self, color: tuple[QtGui.QColor, QtGui.QColor]) -> None:
         self._label_color_light = color[0]
         self._label_color_dark = color[1]
         self.update()
@@ -153,11 +189,11 @@ class ICTextLabel(ICBaseWidget):
             return
 
         # draw the label area
-        tmp_wdth = painter.device().width()
-        tmp_hght = painter.device().height()
+        tmp_width = painter.device().width()
+        tmp_height = painter.device().height()
 
         # define the rectangle to draw the button
-        rect = QtCore.QRectF(3, 3, tmp_wdth-6, tmp_hght-6)
+        rect = QtCore.QRectF(3, 3, tmp_width-6, tmp_height-6)
 
         # path to be drawn
         path = QtGui.QPainterPath()
@@ -200,7 +236,7 @@ class ICTextLabel(ICBaseWidget):
             painter.setFont(fnt)
             pen.setColor(self._name_color)
             painter.setPen(pen)
-            rect = QtCore.QRect(10, 10, tmp_wdth - 20, self._name_text_size + 5)
+            rect = QtCore.QRect(10, 10, tmp_width - 20, self._name_text_size + 5)
             painter.drawText(rect, Qt.AlignLeft, str(self._name))
 
             # draw the value
@@ -208,10 +244,57 @@ class ICTextLabel(ICBaseWidget):
             painter.setFont(fnt)
             pen.setColor(self._value_color)
             painter.setPen(pen)
-            rect = QtCore.QRect(10, tmp_hght - (self._value_text_size + 15), tmp_wdth - 20, self._value_text_size + 5)
-            painter.drawText(rect, Qt.AlignRight, str(self._value))
+            rect = QtCore.QRect(10, tmp_height - (self._value_text_size + 15), tmp_width - 20, self._value_text_size + 5)
+            if self.__type == ICTextLabelType.LabelText:
+                painter.drawText(rect, Qt.AlignRight, self._value)
+            elif self.__type == ICTextLabelType.LabelInteger:
+                painter.drawText(rect, Qt.AlignRight, str(self._value))
+            else:
+                painter.drawText(rect, Qt.AlignRight, self._text_format.format(self._value))
 
     def paintEvent(self, e):
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
         self.redraw(painter, e)
+
+
+class ICClockLabel(ICTextLabel):
+    """
+        A text label showing current time
+    """
+    def __init__(self, name: str, *args, **kwargs):
+        super(ICClockLabel, self).__init__(name, "", *args, **kwargs)
+        # configure the display
+        self.value_text_size = ICDisplayConfig.ClockLabelSize
+        self.value_text_color = ICDisplayConfig.ClockLabelColor
+
+        # datetime format
+        self._time_format: str = '%H:%M:%S'
+
+        # set the current time
+        self._time_now = datetime.now()
+        self.value = self._time_now.strftime(self._time_format)
+
+        # start the timer
+        self._clock_timer = QTimer()
+        self._clock_timer.timeout.connect(self.update_time)
+        self._clock_timer.start(1000)
+
+    @property
+    def time_format(self) -> str:
+        return self._time_format
+
+    @time_format.setter
+    def time_format(self, fmt: str) -> None:
+        self._time_format = fmt
+        self.update_time()
+
+    @property
+    def time_now(self):
+        self._time_now = datetime.now()
+        return self._time_now
+
+    @pyqtSlot()
+    def update_time(self):
+        self._time_now = datetime.now()
+        self.value = self._time_now.strftime(self._time_format)

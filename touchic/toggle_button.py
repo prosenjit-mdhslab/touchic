@@ -9,7 +9,7 @@ This file implements a toggle button
 
 from enum import Enum
 from PyQt5 import QtCore, QtGui
-from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import Qt, pyqtSignal
 from .base_widget import ICWidgetState, ICWidgetPosition
 from .basic_button import ICBasicButton
 from .display_config import ICDisplayConfig
@@ -18,7 +18,7 @@ from .display_config import ICDisplayConfig
 # Different types of the toggle switch
 class ICLEDType(Enum):
     """
-    Enum for LED Type
+        Enum for LED Type
     """
     ToggleNormal = 0
     AlarmCritical = 1
@@ -28,13 +28,13 @@ class ICLEDType(Enum):
 
 class ICToggleButton(ICBasicButton):
     """
-    Toggle Button Class
+        Toggle Button Class
     """
     # toggled signal emitted when the system changes state
     toggled = pyqtSignal(bool, int)
     
-    def __init__(self, label: str, off_text: str, on_text: str, switch_pos: bool,
-                 led_type: ICLEDType = ICLEDType.ToggleNormal, but_id: int = 0, *args, **kwargs):
+    def __init__(self, label: str, off_text: str, on_text: str, switch_pos: bool, led_type: ICLEDType = ICLEDType.ToggleNormal,
+                 but_id: int = 0, *args, **kwargs):
         super(ICToggleButton, self).__init__(name="", but_id=but_id, *args, **kwargs)
 
         # label of the toggling switch
@@ -72,9 +72,6 @@ class ICToggleButton(ICBasicButton):
             self._toggle_on_color = ICDisplayConfig.AlarmNormalOnColor
             self._toggle_off_color = ICDisplayConfig.AlarmNormalOffColor
 
-        # LED display position
-        self._led_position: ICWidgetPosition = ICWidgetPosition.Bottom
-
         # setup visual effects
         self.text_size = ICDisplayConfig.ParamDisplayTextSize
 
@@ -93,12 +90,12 @@ class ICToggleButton(ICBasicButton):
     ########################################################
     # get the current switch position
     @property
-    def switch_position(self) -> bool:
+    def toggle_state(self) -> bool:
         return self._switch_pos
 
     # set the current state. button label is updated
-    @switch_position.setter
-    def switch_position(self, st: bool) -> None:
+    @toggle_state.setter
+    def toggle_state(self, st: bool) -> None:
         # if the state is same as before, we dont need to change
         if self._switch_pos == st:
             return
@@ -126,12 +123,12 @@ class ICToggleButton(ICBasicButton):
 
     # get the on and off text used in the toggle button
     @property
-    def on_off_text(self) -> [str, str]:
+    def on_off_text(self) -> tuple[str, str]:
         return self._on_text, self._off_text
 
     # set the on and off text used in the toggle button
     @on_off_text.setter
-    def on_off_text(self, on_off_txt: [str, str]) -> None:
+    def on_off_text(self, on_off_txt: tuple[str, str]) -> None:
         self._on_text = on_off_txt[0]
         self._off_text = on_off_txt[1]
         self.update()
@@ -182,25 +179,14 @@ class ICToggleButton(ICBasicButton):
 
     # get the on off color
     @property
-    def on_off_led_color(self) -> [QtGui.QColor, QtGui.QColor]:
+    def on_off_led_color(self) -> tuple[QtGui.QColor, QtGui.QColor]:
         return self._toggle_on_color, self._toggle_off_color
 
     # set the on off color
     @on_off_led_color.setter
-    def on_off_led_color(self, color: [QtGui.QColor, QtGui.QColor]) -> None:
+    def on_off_led_color(self, color: tuple[QtGui.QColor, QtGui.QColor]) -> None:
         self._toggle_on_color = color[0]
         self._toggle_off_color = color[1]
-
-    # get the position of the LED
-    @property
-    def led_position(self) -> ICWidgetPosition:
-        return self._led_position
-
-    # set the position of the LED
-    @led_position.setter
-    def led_position(self, pos: ICWidgetPosition) -> None:
-        self._led_position = pos
-        self.update()
 
     ########################################################
     # base class event overrides
@@ -210,7 +196,7 @@ class ICToggleButton(ICBasicButton):
         # process left click if the button is enabled
         if event.button() & Qt.LeftButton:
             # property setter will take care of the remaining steps
-            self.switch_position = not self._switch_pos
+            self.toggle_state = not self.toggle_state
 
     ########################################################
     # overrides and event handlers
@@ -230,8 +216,8 @@ class ICToggleButton(ICBasicButton):
 
         # draw the text only if the button is visible
         if self._state in (ICWidgetState.VisibleEnabled, ICWidgetState.VisibleDisabled):
-            tmp_wdth = painter.device().width()
-            tmp_hght = painter.device().height()
+            tmp_width = painter.device().width()
+            tmp_height = painter.device().height()
 
             # create and set the pen
             pen = QtGui.QPen()
@@ -246,25 +232,28 @@ class ICToggleButton(ICBasicButton):
             painter.setFont(fnt)
 
             # draw the text based on the LED position
-            if self._led_position in (ICWidgetPosition.Bottom, ICWidgetPosition.Right):
-                rect = QtCore.QRect(10, 10, tmp_wdth - 20, self._label_text_size + 3)
+            if self._led_position in (ICWidgetPosition.Bottom | ICWidgetPosition.Right):
+                rect = QtCore.QRect(10, 10, tmp_width - 20, self._label_text_size + 3)
                 painter.drawText(rect, Qt.AlignLeft, self._label)
             else:
-                rect = QtCore.QRect(10, tmp_hght - self._label_text_size-10, tmp_wdth - 20, self._label_text_size + 3)
+                rect = QtCore.QRect(10, tmp_height - self._label_text_size-10, tmp_width - 20, self._label_text_size + 3)
                 painter.drawText(rect, Qt.AlignRight, self._label)
 
-            # draw the toggle
+            # draw the toggle LED
             path = QtGui.QPainterPath()
             path.setFillRule(Qt.WindingFill)
+
             if self._led_position == ICWidgetPosition.Bottom:
-                rect = QtCore.QRectF(10, tmp_hght - 25, tmp_wdth - 20, 15)
+                rect = QtCore.QRectF(10, tmp_height - 25, tmp_width - 20, 15)
             elif self._led_position == ICWidgetPosition.Top:
-                rect = QtCore.QRectF(10, 10, tmp_wdth - 20, 15)
+                rect = QtCore.QRectF(10, 10, tmp_width - 20, 15)
             elif self._led_position == ICWidgetPosition.Right:
-                rect = QtCore.QRectF(tmp_wdth-30, 10, 20, tmp_hght-20)
+                rect = QtCore.QRectF(tmp_width-30, 10, 20, tmp_height-20)
             else:
-                rect = QtCore.QRectF(10, 10, 20, tmp_hght - 20)
+                rect = QtCore.QRectF(10, 10, 20, tmp_height - 20)
             path.addRoundedRect(rect, 5, 5)
+
+            # color depends on the switch position (on or off)
             if self._switch_pos:
                 painter.setBrush(self._toggle_on_color)
             else:

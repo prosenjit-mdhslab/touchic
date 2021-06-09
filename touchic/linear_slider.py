@@ -5,12 +5,17 @@ Created on May  20 2021
 @author: Prosenjit
 
 A linear slider to graphically enter data
+TODO: Popup dialog
 """
 
 from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import Qt, pyqtSignal
+from typing import Union
+from math import sqrt
 from .display_config import ICDisplayConfig
-from .base_widget import ICBaseWidget, ICWidgetState, ICWidgetOrientation
+from .base_widget import ICBaseWidget, ICWidgetState, ICWidgetPosition
+from .linear_axis import ICLinearAxis, ICLinearAxisContainer, ICLinearContainerType
+from .config_button import ICConfigDialogTemplate
 
 
 class ICSlider(ICBaseWidget):
@@ -21,20 +26,12 @@ class ICSlider(ICBaseWidget):
     # emits the value changed
     changed = pyqtSignal(float)
     
-    def __init__(self, values: list[float], current_value: float, displayed_values: list[str] = None,
-                 orient: ICWidgetOrientation = ICWidgetOrientation.Horizontal, widget_id: int = 0,
-                 *args, **kwargs):
+    def __init__(self, values: list[float], current_value: float, position: ICWidgetPosition = ICWidgetPosition.Bottom, widget_id: int = 0, *args, **kwargs):
         super(ICSlider, self).__init__(widget_id, *args, **kwargs)
 
         # setup the variables
         # list of valid values from which the user can select
         self._internal_values: list[float] = values
-
-        # set up the displayed values
-        if displayed_values is None:
-            self._displayed_values: list[str] = [str(x) for x in values]
-        else:
-            self._displayed_values: list[str] = displayed_values
 
         # set up the current selected value
         if current_value in values:
@@ -49,6 +46,17 @@ class ICSlider(ICBaseWidget):
         self._slided: bool = False
         self._knob_loc = None
 
+        # has the current value lead to an alarm
+        self.alarm_activated = False
+
+        # upper alarm level for the gauge
+        self._alarm_upper_level: float = values[0]
+        self._alarm_upper_level_set: bool = False
+
+        # lower alarm level for the gauge
+        self._alarm_lower_level: float = values[-1]
+        self._alarm_lower_level_set: bool = False
+
         # color for the slide background
         self._slide_color_light: QtGui.QColor = ICDisplayConfig.LinearSlideBoxColorLight
         self._slide_color_dark: QtGui.QColor = ICDisplayConfig.LinearSlideBoxColorDark
@@ -61,33 +69,23 @@ class ICSlider(ICBaseWidget):
         self._scale_color_light: QtGui.QColor = ICDisplayConfig.LinearSlideRulerColorLight
         self._scale_color_dark: QtGui.QColor = ICDisplayConfig.LinearSlideRulerColorDark
 
+        # scale colors alarmed
+        self._scale_color_alarm_light: QtGui.QColor = ICDisplayConfig.LinearSlideRulerAlarmColorLight
+        self._scale_color_alarm_dark: QtGui.QColor = ICDisplayConfig.LinearSlideRulerAlarmColorDark
+
         # color of the knob
         self._knob_color_light: QtGui.QColor = ICDisplayConfig.LinearSlideKnobLight
         self._knob_color_dark: QtGui.QColor = ICDisplayConfig.LinearSlideKnobDark
 
-        # y axis tick size and color
-        self._tick_color: QtGui.QColor = ICDisplayConfig.LinearGaugeRulerColor
-        self._tick_text_size: int = ICDisplayConfig.GeneralTextSize
-        self._tick_index_steps: int = 0
-
-        # redrawing scales
-        self._redrawing_scales = True
-
-        # calculate optimum ticks
-        self._calculate_tick_steps()
-
         # click-ability and focus-ability
-        self.focusable = True
+        self.focusable = False
         self.clickable = True
 
         # set the orientation of the widget
-        self.orientation = orient
+        self.position = position
 
         # display configuration
-        self.setSizePolicy(
-            QtWidgets.QSizePolicy.MinimumExpanding,
-            QtWidgets.QSizePolicy.MinimumExpanding
-        )
+        self.setSizePolicy(QtWidgets.QSizePolicy.MinimumExpanding, QtWidgets.QSizePolicy.MinimumExpanding)
 
     ########################################################
     # properties
@@ -110,107 +108,142 @@ class ICSlider(ICBaseWidget):
             return
         # the set value should be between min and max
         if self._internal_values[0] <= new_val <= self._internal_values[-1]:
+
+            # find a valid value closest to the new value
             gap = [abs(x - new_val) for x in self._internal_values]
             self._selected_index = gap.index(min(gap))
             self._selected_value = self._internal_values[self._selected_index]
+
+            self.alarm_activated = False
+            # check for alarm levels
+            if self._alarm_lower_level_set:
+                if self._selected_value < self._alarm_lower_level:
+                    self.alarm_activated = True
+
+            if self._alarm_upper_level_set:
+                if self._selected_value > self._alarm_upper_level:
+                    self.alarm_activated = True
+
+            # notify listeners about the change
             self.changed.emit(self._selected_value)
             self.append_history("set", self._selected_value)
-            # no need to redraw scales
-            self._redrawing_scales = False
             self.update()
-
-    # displayed values
-    @property
-    def displayed_values(self) -> list[str]:
-        return self._displayed_values
 
     # slider color
     @property
-    def slider_colors(self) -> [QtGui.QColor, QtGui.QColor]:
+    def slider_colors(self) -> tuple[QtGui.QColor, QtGui.QColor]:
         return self._slide_color_light, self._slide_color_dark
 
     @slider_colors.setter
-    def slider_colors(self, clrs: [QtGui.QColor, QtGui.QColor]) -> None:
+    def slider_colors(self, clrs: tuple[QtGui.QColor, QtGui.QColor]) -> None:
         self._slide_color_light = clrs[0]
         self._slide_color_dark = clrs[1]
         self.update()
 
     # groove colors
     @property
-    def groove_colors(self) -> [QtGui.QColor, QtGui.QColor]:
+    def groove_colors(self) -> tuple[QtGui.QColor, QtGui.QColor]:
         return self._groove_color_light, self._groove_color_dark
 
     @groove_colors.setter
-    def groove_colors(self, clrs: [QtGui.QColor, QtGui.QColor]) -> None:
+    def groove_colors(self, clrs: tuple[QtGui.QColor, QtGui.QColor]) -> None:
         self._groove_color_light = clrs[0]
         self._groove_color_dark = clrs[1]
         self.update()
 
     # scale colors
     @property
-    def scale_colors(self) -> [QtGui.QColor, QtGui.QColor]:
+    def scale_colors(self) -> tuple[QtGui.QColor, QtGui.QColor]:
         return self._scale_color_light, self._scale_color_dark
 
     @scale_colors.setter
-    def scale_colors(self, clrs: [QtGui.QColor, QtGui.QColor]) -> None:
+    def scale_colors(self, clrs: tuple[QtGui.QColor, QtGui.QColor]) -> None:
         self._scale_color_light = clrs[0]
         self._scale_color_dark = clrs[1]
         self.update()
 
+    # alarm colors
+    @property
+    def scale_alarm_colors(self) -> tuple[QtGui.QColor, QtGui.QColor]:
+        return self._scale_color_alarm_light, self._scale_color_alarm_dark
+
+    @scale_alarm_colors.setter
+    def scale_alarm_colors(self, clrs: tuple[QtGui.QColor, QtGui.QColor]) -> None:
+        self._scale_color_alarm_light = clrs[0]
+        self._scale_color_alarm_dark = clrs[1]
+        self.update()
+
     # knob colors
     @property
-    def knob_colors(self) -> [QtGui.QColor, QtGui.QColor]:
+    def knob_colors(self) -> tuple[QtGui.QColor, QtGui.QColor]:
         return self._knob_color_light, self._knob_color_dark
 
     @knob_colors.setter
-    def knob_colors(self, clrs: [QtGui.QColor, QtGui.QColor]) -> None:
+    def knob_colors(self, clrs: tuple[QtGui.QColor, QtGui.QColor]) -> None:
         self._knob_color_light = clrs[0]
         self._knob_color_dark = clrs[1]
         self.update()
 
-    # tick color
+        # get the upper level alarm
+        # tuple of (name, value)
+
     @property
-    def tick_color(self) -> QtGui.QColor:
-        return self._tick_color
+    def upper_alarm(self) -> Union[float, None]:
+        if self._alarm_upper_level_set:
+            return self._alarm_upper_level
+        else:
+            return None
 
-    @tick_color.setter
-    def tick_color(self, clr: QtGui.QColor) -> None:
-        self._tick_color = clr
-        self.update()
+    # set the upper level alarm
+    @upper_alarm.setter
+    def upper_alarm(self, alarm: float) -> None:
+        # check if upper alarm level is greater than the lower alarm level
+        if self._alarm_lower_level_set:
+            if alarm < self._alarm_lower_level:
+                return
 
-    # tick text size
+        # check if the limit value is in between the max and min values
+        if self._internal_values[0] <= alarm <= self._internal_values[-1]:
+            self._alarm_upper_level_set = True
+            self._alarm_upper_level = alarm
+
+            # check for alarm level
+            if self._selected_value > self._alarm_upper_level:
+                self.alarm_activated = True
+                self.changed.emit(self._selected_value)
+            self.update()
+
+    # get the lower level alarm
+    # tuple of (name, value)
     @property
-    def tick_text_size(self) -> int:
-        return self._tick_text_size
+    def lower_alarm(self) -> Union[float, None]:
+        if self._alarm_lower_level_set:
+            return self._alarm_lower_level
+        else:
+            return None
 
-    @tick_text_size.setter
-    def tick_text_size(self, txt_sz: int) -> None:
-        self._tick_text_size = txt_sz
-        self.update()
+    # set the upper level alarm
+    @lower_alarm.setter
+    def lower_alarm(self, alarm: float) -> None:
+        # check if lower alarm level is less the upper alarm level
+        if self._alarm_upper_level_set:
+            if alarm > self._alarm_upper_level:
+                return
 
-    # tick steps
-    @property
-    def tick_steps(self) -> int:
-        return self._tick_index_steps
+        # check if the limit value is in between the max and min values
+        if self._internal_values[0] <= alarm <= self._internal_values[-1]:
+            self._alarm_lower_level_set = True
+            self._alarm_lower_level = alarm
 
-    @tick_steps.setter
-    def tick_steps(self, stp: int) -> None:
-        self._tick_index_steps = stp
-        self.update()
+            # check if alarm is active
+            if self._selected_value < self._alarm_lower_level:
+                self.alarm_activated = True
+                self.changed.emit(self._selected_value)
+            self.update()
 
     ########################################################
     # functions
     ########################################################
-    # evaluate the optimum number of steps
-    def _calculate_tick_steps(self):
-        num_vals = len(self._internal_values)
-        test_steps = [(8 - x) for x in range(7)]
-        for step in test_steps:
-            if num_vals % step == 0:
-                self._tick_index_steps = int(num_vals / step)
-                return
-        # default steps
-        self._tick_index_steps = int(num_vals / 2)
 
     ########################################################
     # base class event overrides
@@ -220,28 +253,39 @@ class ICSlider(ICBaseWidget):
         # mouse pressed event
         if event.button() & Qt.LeftButton:
             dist = event.pos() - self._knob_loc
-            lsqr = QtCore.QPointF.dotProduct(dist, dist)
-            if lsqr < 225:
+            len_square = QtCore.QPointF.dotProduct(dist, dist)
+            if len_square < 225:
                 self._sliding = True
 
     # mouse moved event
     def on_mouse_moved(self, event: QtGui.QMouseEvent) -> None:
         if self._sliding:
-            tmp_wdth = self.width()
-            tmp_hght = self.height()
+            tmp_width = self.width()
+            tmp_height = self.height()
             min_slide = 20
-            max_slide = (tmp_wdth - 20) if self.orientation == ICWidgetOrientation.Horizontal else (tmp_hght - 20)
-            new_pos = event.pos().x() if self.orientation == ICWidgetOrientation.Horizontal else max_slide - event.pos().y()
+            max_slide = (tmp_width - 20) if self.position.is_horizontal() else (tmp_height - 20)
+            new_pos = event.pos().x() if self.position.is_horizontal() else max_slide - event.pos().y()
             # if the new position is between the slide geometry
             if min_slide <= new_pos <= max_slide:
-                new_val = self._internal_values[0] + (new_pos - min_slide) * \
-                          (self._internal_values[-1] - self._internal_values[0]) / (max_slide - min_slide)
+                new_val = self._internal_values[0] + (new_pos - min_slide) * (self._internal_values[-1] - self._internal_values[0]) / (max_slide - min_slide)
+
+                # find the closest value in the valid values list
                 gap = [abs(x - new_val) for x in self._internal_values]
                 self._selected_index = gap.index(min(gap))
                 self._selected_value = self._internal_values[self._selected_index]
+
+                self.alarm_activated = False
+                # check for alarm levels
+                if self._alarm_lower_level_set:
+                    if self._selected_value < self._alarm_lower_level:
+                        self.alarm_activated = True
+
+                if self._alarm_upper_level_set:
+                    if self._selected_value > self._alarm_upper_level:
+                        self.alarm_activated = True
+
+                # notify listeners about the change
                 self.changed.emit(self._selected_value)
-                # no need to redraw scales
-                self._redrawing_scales = False
                 self.update()
                 self._slided = True
 
@@ -255,8 +299,9 @@ class ICSlider(ICBaseWidget):
                     self.append_history("user", self._selected_value)
                     self._slided = False
             else:
-                new_pos = event.pos().x() if self.orientation == ICWidgetOrientation.Horizontal else -event.pos().y()
-                knob_pos = self._knob_loc.x() if self.orientation == ICWidgetOrientation.Horizontal else -self._knob_loc.y()
+                # handle click event
+                new_pos = event.pos().x() if self.position.is_horizontal() else -event.pos().y()
+                knob_pos = self._knob_loc.x() if self.position.is_horizontal() else -self._knob_loc.y()
                 list_len = len(self._internal_values)
                 if new_pos > knob_pos:
                     # increment by one pos
@@ -264,10 +309,19 @@ class ICSlider(ICBaseWidget):
                     if next_index < list_len:
                         self._selected_value = self._internal_values[next_index]
                         self._selected_index = next_index
-                        # no need to redraw scales
-                        self._redrawing_scales = False
+
+                        self.alarm_activated = False
+                        # check for alarm levels
+                        if self._alarm_lower_level_set:
+                            if self._selected_value < self._alarm_lower_level:
+                                self.alarm_activated = True
+
+                        if self._alarm_upper_level_set:
+                            if self._selected_value > self._alarm_upper_level:
+                                self.alarm_activated = True
+
                         self.update()
-                        self.valueChanged.emit(self._selected_value)
+                        self.changed.emit(self._selected_value)
                         self.append_history("", self._selected_value)
                 else:
                     # reduce by one pos
@@ -275,21 +329,20 @@ class ICSlider(ICBaseWidget):
                     if next_index >= 0:
                         self._selected_value = self._internal_values[next_index]
                         self._selected_index = next_index
-                        # no need to redraw scales
-                        self._redrawing_scales = False
-                        self.update()
-                        self.valueChanged.emit(self._selected_value)
-                        self.append_history("", self._selected_value)
 
-    # orientation changed moved
-    def on_orientation_changed(self) -> None:
-        if self.orientation == ICWidgetOrientation.Horizontal:
-            self.size_hint = (ICDisplayConfig.LinearSlideWidth, ICDisplayConfig.LinearSlideHeight)
-            self.setMaximumSize(10000, ICDisplayConfig.LinearSlideHeight)
-        else:
-            self.size_hint = (ICDisplayConfig.LinearSlideHeight, ICDisplayConfig.LinearSlideWidth)
-            self.setMaximumSize(ICDisplayConfig.LinearSlideHeight, 10000)
-        self.update()
+                        self.alarm_activated = False
+                        # check for alarm levels
+                        if self._alarm_lower_level_set:
+                            if self._selected_value < self._alarm_lower_level:
+                                self.alarm_activated = True
+
+                        if self._alarm_upper_level_set:
+                            if self._selected_value > self._alarm_upper_level:
+                                self.alarm_activated = True
+
+                        self.update()
+                        self.changed.emit(self._selected_value)
+                        self.append_history("", self._selected_value)
 
     ########################################################
     # overrides and event handlers
@@ -301,42 +354,138 @@ class ICSlider(ICBaseWidget):
         self.redraw(painter)
 
     # draw the widget
-    def redraw(self, painter):
+    def redraw(self, painter) -> None:
         # nothing to draw if the widget is hidden
         if self.state == ICWidgetState.Hidden:
             return
 
-        # draw the main rectangle
-        tmp_wdth = painter.device().width()
-        tmp_hght = painter.device().height()
+        # get window dimension
+        temp_width = painter.device().width()
+        temp_height = painter.device().height()
 
-        # if widget is in focus then draw the focus selector
-        if self.in_focus:
-            # overall widget rect
-            rect = QtCore.QRectF(1, 1, tmp_wdth - 2, tmp_hght - 2)
+        # current position
+        curr_val = self._selected_value
+        pos = (curr_val - self._internal_values[0]) / (self._internal_values[-1] - self._internal_values[0])
 
-            # define and set the path
-            pen = QtGui.QPen(self.focus_color)
-            pen.setWidth(3)
-            pen.setCapStyle(Qt.RoundCap)
-            pen.setJoinStyle(Qt.RoundJoin)
-            painter.setPen(pen)
+        volume_p_one = QtCore.QPointF(0, 0)
+        volume_p_two = QtCore.QPointF(0, 0)
+        volume_p_three = QtCore.QPointF(0, 0)
+        volume_p_four = QtCore.QPointF(0, 0)
 
-            # define the path and draw
-            path = QtGui.QPainterPath()
-            path.addRoundedRect(rect, 5, 5)
-            painter.drawPath(path)
+        #######################################
+        # calculate dimensions
+        #######################################
+        if self.position.is_horizontal():
+            # slider back ground dimensions
+            slider_size_x = temp_width
+            slider_size_y = temp_height / 2
+            slider_start_x = 0
 
-        # reduce the drawing area to account for the selected rectangle
-        tmp_wdth -= 6
-        tmp_hght -= 6
-        painter.translate(3, 3)
+            # groove dimensions
+            groove_start_x = 0.35 * slider_size_y
+            groove_size_x = temp_width - 2 * groove_start_x
+            groove_size_y = 0.3 * slider_size_y
 
-        # draw the slide background
-        if self.orientation == ICWidgetOrientation.Horizontal:
-            rect = QtCore.QRectF(0, tmp_hght/3, tmp_wdth, tmp_hght/3)
+            # scale dimensions
+            scale_start_x = groove_start_x + 1
+            scale_size_x = pos * (groove_size_x - 2)
+            scale_size_y = groove_size_y - 2
+
+            # knob dimensions
+            knob_size_x = 0.6 * slider_size_y
+            knob_size_y = 0.5 * slider_size_y
+            knob_start_x = scale_start_x + scale_size_x - knob_size_x / 2
+
+            # volume dimensions
+            volume_p_one.setX(scale_start_x)
+            volume_p_two.setX(volume_p_one.x())
+            volume_p_three.setX(scale_start_x + scale_size_x)
+            volume_p_four.setX(volume_p_three.x())
+            volume_min_height = 0.1 * slider_size_y
+
+            # top and bottom specific numbers
+            if self.position == ICWidgetPosition.Top:
+                slider_start_y = slider_size_y
+                groove_start_y = (3 * slider_size_y - groove_size_y) / 2
+                knob_start_y = (3 * slider_size_y - knob_size_y) / 2
+
+                volume_p_one.setY(slider_start_y - 0.2 * slider_size_y)
+                volume_p_two.setY(volume_p_one.y() - volume_min_height)
+                volume_p_three.setY(volume_p_two.y() - 0.6 * slider_size_y * pos)
+                volume_p_four.setY(volume_p_one.y())
+                max_volume_pos = volume_p_two.y() - 0.6 * slider_size_y
+
+            else:
+                slider_start_y = 0
+                groove_start_y = (slider_size_y - groove_size_y) / 2
+                knob_start_y = (slider_size_y - knob_size_y) / 2
+
+                volume_p_one.setY(slider_size_y + 0.2 * slider_size_y)
+                volume_p_two.setY(volume_p_one.y() + volume_min_height)
+                volume_p_three.setY(volume_p_two.y() + 0.6 * slider_size_y * pos)
+                volume_p_four.setY(volume_p_one.y())
+                max_volume_pos = volume_p_two.y() + 0.6 * slider_size_y
+
+            scale_start_y = groove_start_y + 1
         else:
-            rect = QtCore.QRectF(tmp_wdth/3, 0, tmp_wdth/3, tmp_hght)
+            # slider back ground dimensions
+            slider_size_x = temp_width / 2
+            slider_size_y = temp_height
+            slider_start_y = 0
+
+            # groove dimensions
+            groove_start_y = 0.35 * slider_size_x
+            groove_size_y = temp_height - 2 * groove_start_y
+            groove_size_x = 0.3 * slider_size_x
+
+            # scale dimensions
+            scale_size_y = pos * (groove_size_y - 2)
+            scale_start_y = (groove_start_y + groove_size_y - 1) - scale_size_y
+            scale_size_x = groove_size_x - 2
+
+            # knob dimensions
+            knob_size_x = 0.5 * slider_size_x
+            knob_size_y = 0.6 * slider_size_x
+            knob_start_y = scale_start_y - knob_size_y / 2
+
+            # volume dimensions
+            volume_p_one.setY(scale_start_y + scale_size_y)
+            volume_p_two.setY(volume_p_one.y())
+            volume_p_three.setY(scale_start_y)
+            volume_p_four.setY(volume_p_three.y())
+            volume_min_height = 0.1 * slider_size_x
+
+            # left and right specific numbers
+            if self.position == ICWidgetPosition.Left:
+                slider_start_x = slider_size_x
+                groove_start_x = (3 * slider_size_x - groove_size_x) / 2
+                knob_start_x = (3 * slider_size_x - knob_size_x) / 2
+
+                volume_p_one.setX(slider_start_x - 0.2 * slider_size_x)
+                volume_p_two.setX(volume_p_one.x() - volume_min_height)
+                volume_p_three.setX(volume_p_two.x() - 0.6 * slider_size_x * pos)
+                volume_p_four.setX(volume_p_one.x())
+                max_volume_pos = volume_p_two.x() - 0.6 * slider_size_x
+            else:
+                slider_start_x = 0
+                groove_start_x = (slider_size_x - groove_size_x) / 2
+                knob_start_x = (slider_size_x - knob_size_x) / 2
+
+                volume_p_one.setX(slider_size_x + 0.2 * slider_size_x)
+                volume_p_two.setX(volume_p_one.x() + volume_min_height)
+                volume_p_three.setX(volume_p_two.x() + 0.6 * slider_size_x * pos)
+                volume_p_four.setX(volume_p_one.x())
+                max_volume_pos = volume_p_two.x() + 0.6 * slider_size_x
+
+            scale_start_x = groove_start_x + 1
+
+        # set the knob location
+        self._knob_loc = QtCore.QPointF(knob_start_x + knob_size_x / 2, knob_start_y + knob_size_y / 2)
+
+        #########################################################
+        # draw the slide background
+        #########################################################
+        rect = QtCore.QRectF(slider_start_x, slider_start_y, slider_size_x, slider_size_y)
 
         # set the brush
         brush = QtGui.QLinearGradient(rect.topLeft(), rect.bottomRight())
@@ -358,15 +507,14 @@ class ICSlider(ICBaseWidget):
         path.addRoundedRect(rect, 10, 10)
         painter.drawPath(path)
 
-        # draw the inner rectangle
-        min_slide = 20
-        max_slide = (tmp_wdth - 20) if self.orientation == ICWidgetOrientation.Horizontal else (tmp_hght - 20)
-        slide_length = max_slide - min_slide
-        if self.orientation == ICWidgetOrientation.Horizontal:
-            rect = QtCore.QRectF(min_slide, tmp_hght/2 - 8, slide_length, 16)
+        #########################################################
+        # draw the groove
+        #########################################################
+        rect = QtCore.QRectF(groove_start_x, groove_start_y, groove_size_x, groove_size_y)
+
+        if self.position.is_horizontal():
             brush = QtGui.QLinearGradient(rect.topLeft(), rect.bottomLeft())
         else:
-            rect = QtCore.QRectF(tmp_wdth/2 - 8, min_slide, 16, slide_length)
             brush = QtGui.QLinearGradient(rect.topLeft(), rect.topRight())
 
         # set the brush
@@ -384,22 +532,25 @@ class ICSlider(ICBaseWidget):
         path.addRoundedRect(rect, 5, 5)
         painter.drawPath(path)
 
+        #########################################################
         # draw the scale
-        # calculate the length of the scale
-        curr_val = self._selected_value
-        pos = (curr_val - self._internal_values[0])/(self._internal_values[-1] - self._internal_values[0])
-        scale_len = pos * (max_slide - min_slide)
+        #########################################################
+        rect = QtCore.QRectF(scale_start_x, scale_start_y, scale_size_x, scale_size_y)
 
-        if self.orientation == ICWidgetOrientation.Horizontal:
-            rect = QtCore.QRectF(min_slide, tmp_hght/2 - 7, scale_len, 14)
-            brush = QtGui.QLinearGradient(rect.topLeft(), rect.bottomRight())
+        if self.position.is_horizontal():
+            brush = QtGui.QLinearGradient(QtCore.QPointF(groove_start_x, groove_start_y),
+                                          QtCore.QPointF(groove_start_x + groove_size_x, groove_start_y))
         else:
-            rect = QtCore.QRectF(tmp_wdth/2 - 7, max_slide - scale_len, 14, scale_len)
-            brush = QtGui.QLinearGradient(rect.bottomLeft(), rect.topRight())
+            brush = QtGui.QLinearGradient(QtCore.QPointF(groove_start_x, groove_start_y + groove_size_y),
+                                          QtCore.QPointF(groove_start_x, groove_start_y))
 
         # set the brush
-        brush.setColorAt(0, self._scale_color_dark)
-        brush.setColorAt(1, self._scale_color_light)
+        if self.alarm_activated:
+            brush.setColorAt(0, self._scale_color_alarm_dark)
+            brush.setColorAt(1, self._scale_color_alarm_light)
+        else:
+            brush.setColorAt(0, self._scale_color_dark)
+            brush.setColorAt(1, self._scale_color_light)
         painter.setBrush(brush)
 
         # set the brush
@@ -412,14 +563,12 @@ class ICSlider(ICBaseWidget):
         path.addRoundedRect(rect, 5, 5)
         painter.drawPath(path)
 
-        # set the brush for the knob
-        if self.orientation == ICWidgetOrientation.Horizontal:
-            rect = QtCore.QRectF(min_slide + scale_len - 20, tmp_hght/2 - 15, 40, 30)
-            self._knob_loc = QtCore.QPointF(scale_len + min_slide, tmp_hght/2)
-        else:
-            rect = QtCore.QRectF(tmp_wdth/2 - 15, max_slide - scale_len - 20, 30, 40)
-            self._knob_loc = QtCore.QPointF(tmp_wdth/2, max_slide - scale_len)
+        #########################################################
+        # draw the knob
+        #########################################################
+        rect = QtCore.QRectF(knob_start_x, knob_start_y, knob_size_x, knob_size_y)
 
+        # set the brush for the knob
         brush = QtGui.QLinearGradient(rect.topLeft(), rect.bottomLeft())
         brush.setColorAt(0, self._knob_color_light)
         brush.setColorAt(1, self._knob_color_dark)
@@ -438,65 +587,31 @@ class ICSlider(ICBaseWidget):
         path.addRoundedRect(rect, 7, 7)
         painter.drawPath(path)
 
-        # draw the volume background
-        #poly = QtGui.QPolygonF()
-        if self.orientation == ICWidgetOrientation.Horizontal:
-            slide_base = tmp_hght/3 - 10
-            slide_top = 10
-        #    poly.append(QtCore.QPointF(min_slide, slide_base))
-        #    poly.append(QtCore.QPointF(min_slide, slide_base - 10))
-        #    poly.append(QtCore.QPointF(max_slide, slide_top))
-        #    poly.append(QtCore.QPointF(max_slide, slide_base))
-        #    poly.append(QtCore.QPointF(min_slide, slide_base))
-        #    brush = QtGui.QLinearGradient(QtCore.QPointF(max_slide, slide_top), QtCore.QPointF(max_slide, slide_base))
-        else:
-            slide_base = 2*tmp_wdth/3 + 10
-            slide_top = tmp_wdth - 10
-        #    poly.append(QtCore.QPointF(slide_base, max_slide))
-        #    poly.append(QtCore.QPointF(slide_base + 10, max_slide))
-        #    poly.append(QtCore.QPointF(slide_top, min_slide))
-        #    poly.append(QtCore.QPointF(slide_base, min_slide))
-        #    poly.append(QtCore.QPointF(slide_base, max_slide))
-        #    brush = QtGui.QLinearGradient(QtCore.QPointF(slide_top, min_slide), QtCore.QPointF(max_slide, slide_base))
-
-        # select the brush
-        #brush.setColorAt(0, self._groove_color_light)
-        #brush.setColorAt(1, self._groove_color_dark)
-        #painter.setBrush(brush)
-
-        # select the pen
-        #pen.setWidth(5)
-        #pen.setBrush(brush)
-        #painter.setPen(pen)
-
-        # paint the path
-        #path = QtGui.QPainterPath()
-        #path.setFillRule(Qt.WindingFill)
-        #path.addPolygon(poly)
-        #painter.drawPath(path)
-
-        # draw the volume foreground
+        #########################################################
+        # draw the volume
+        #########################################################
+        # draw the volume polygon
         poly = QtGui.QPolygonF()
-        if self.orientation == ICWidgetOrientation.Horizontal:
-            slide_y = 10 + scale_len * (slide_base - 10 - slide_top) / slide_length
-            poly.append(QtCore.QPointF(min_slide, slide_base))
-            poly.append(QtCore.QPointF(min_slide, slide_base - 10))
-            poly.append(QtCore.QPointF(min_slide + scale_len, slide_base - slide_y))
-            poly.append(QtCore.QPointF(min_slide + scale_len, slide_base))
-            poly.append(QtCore.QPointF(min_slide, slide_base))
-            brush = QtGui.QLinearGradient(QtCore.QPointF(max_slide, slide_top), QtCore.QPointF(min_slide, slide_base))
+        poly.append(volume_p_one)
+        poly.append(volume_p_two)
+        poly.append(volume_p_three)
+        poly.append(volume_p_four)
+        poly.append(volume_p_one)
+
+        if self.position.is_horizontal():
+            brush = QtGui.QLinearGradient(QtCore.QPointF(volume_p_one.x() + (groove_size_x - 2), max_volume_pos),
+                                          QtCore.QPointF(volume_p_one.x(), volume_p_one.y()))
         else:
-            slide_x = 10 + scale_len * (slide_top - slide_base - 10) / slide_length
-            poly.append(QtCore.QPointF(slide_base, max_slide))
-            poly.append(QtCore.QPointF(slide_base + 10, max_slide))
-            poly.append(QtCore.QPointF(slide_base + slide_x, max_slide - scale_len))
-            poly.append(QtCore.QPointF(slide_base, max_slide - scale_len))
-            poly.append(QtCore.QPointF(slide_base, max_slide))
-            brush = QtGui.QLinearGradient(QtCore.QPointF(slide_top, min_slide), QtCore.QPointF(slide_base, max_slide))
+            brush = QtGui.QLinearGradient(QtCore.QPointF(max_volume_pos, volume_p_one.y() - (groove_size_y - 2)),
+                                          QtCore.QPointF(volume_p_one.x(), volume_p_one.y()))
 
         # set the brush
-        brush.setColorAt(0, self._slide_color_light)
-        brush.setColorAt(1, self._scale_color_dark)
+        if self.alarm_activated:
+            brush.setColorAt(1, self._scale_color_alarm_dark)
+            brush.setColorAt(0, self._scale_color_alarm_light)
+        else:
+            brush.setColorAt(1, self._scale_color_dark)
+            brush.setColorAt(0, self._scale_color_light)
         painter.setBrush(brush)
 
         # set the pen
@@ -510,376 +625,240 @@ class ICSlider(ICBaseWidget):
         path.addPolygon(poly)
         painter.drawPath(path)
 
-        # check if we need to redraw scales
-        if not self._redrawing_scales:
-            self._redrawing_scales = True
-            return
 
-        # define the pen to draw the scale
-        pen = QtGui.QPen()
-        pen.setWidth(3)
-        pen.setCapStyle(Qt.RoundCap)
-        pen.setJoinStyle(Qt.RoundJoin)
-        pen.setBrush(self._tick_color)
-        painter.setPen(pen)
-
-        # calculate and draw the vertical or horizontal line
-        if self.orientation == ICWidgetOrientation.Vertical:
-            rule_loc = tmp_wdth/3 - 7
-            painter.drawLine(QtCore.QPointF(rule_loc, min_slide), QtCore.QPointF(rule_loc, max_slide))
-        else:
-            rule_loc = tmp_hght - (tmp_hght/3 - 7)
-            painter.drawLine(QtCore.QPointF(min_slide, rule_loc), QtCore.QPointF(max_slide, rule_loc))
-
-        # modify the font to write the scale
-        fnt = painter.font()
-        fnt.setPixelSize(self._tick_text_size)
-        painter.setFont(fnt)
-
-        # draw the first tick
-        tick_pos = min_slide
-        curr_index: int = self._tick_index_steps
-        max_index = len(self._internal_values)
-        incr_x = ((self._internal_values[curr_index] - self._internal_values[0]) /
-                  (self._internal_values[-1] - self._internal_values[0])) * slide_length
-        if self.orientation == ICWidgetOrientation.Horizontal:
-            painter.drawLine(QtCore.QPointF(tick_pos, rule_loc), QtCore.QPointF(tick_pos, rule_loc + 5))
-            rect = QtCore.QRectF(tick_pos, rule_loc + 7, incr_x, self._tick_text_size + 5)
-            painter.drawText(rect, Qt.AlignLeft, self._displayed_values[0])
-        else:
-            painter.drawLine(QtCore.QPointF(rule_loc, tick_pos), QtCore.QPointF(rule_loc - 5, tick_pos))
-            rect = QtCore.QRectF(0, tick_pos, rule_loc - 7, self._tick_text_size + 5)
-            painter.drawText(rect, Qt.AlignRight, self._displayed_values[max_index-1])
-
-        # draw the remaining ticks
-        while curr_index < max_index:
-            # calculate the location for drawing the tick
-            tick_pos = ((self._internal_values[curr_index] - self._internal_values[0]) /
-                        (self._internal_values[-1] - self._internal_values[0])) * slide_length + min_slide
-            if self.orientation == ICWidgetOrientation.Horizontal:
-                painter.drawLine(QtCore.QPointF(tick_pos, rule_loc), QtCore.QPointF(tick_pos, rule_loc + 5))
-                rect = QtCore.QRectF(tick_pos - self._tick_text_size, rule_loc + 7, incr_x, self._tick_text_size + 5)
-                painter.drawText(rect, Qt.AlignLeft, self._displayed_values[curr_index])
-            else:
-                painter.drawLine(QtCore.QPointF(rule_loc, tick_pos), QtCore.QPointF(rule_loc - 5, tick_pos))
-                rect = QtCore.QRectF(0, tick_pos - 0.5 * self._tick_text_size, rule_loc - 7, self._tick_text_size + 5)
-                painter.drawText(rect, Qt.AlignRight, self._displayed_values[max_index - curr_index])
-            # increment index
-            curr_index += self._tick_index_steps
-        # draw the last tick
-        tick_pos = max_slide
-        if self.orientation == ICWidgetOrientation.Horizontal:
-            painter.drawLine(QtCore.QPointF(tick_pos, rule_loc), QtCore.QPointF(tick_pos, rule_loc + 5))
-            rect = QtCore.QRectF(tick_pos - incr_x, rule_loc + 7, incr_x, self._tick_text_size + 5)
-            painter.drawText(rect, Qt.AlignRight, self._displayed_values[-1])
-        else:
-            painter.drawLine(QtCore.QPointF(rule_loc, tick_pos), QtCore.QPointF(rule_loc - 5, tick_pos))
-            rect = QtCore.QRectF(0, tick_pos - self._tick_text_size, rule_loc - 7, self._tick_text_size + 5)
-            painter.drawText(rect, Qt.AlignRight, self._displayed_values[0])
-
-
-class ICLinearSlide(ICBaseWidget):
+class ICLinearSlide(ICLinearAxisContainer):
     """
     Compound widget with a slider and label for displaying the plotted value
     """
-    def __init__(self, name: str, values: list[float], current_value: float, displayed_values: list[str] = None,
-                 orient: ICWidgetOrientation = ICWidgetOrientation.Horizontal, widget_id: int = 0,
-                 *args, **kwargs):
-        super(ICLinearSlide, self).__init__(widget_id, *args, **kwargs)
+    def __init__(self, name: str, unit: str, values: list[float], current_value: float, displayed_values: list[str] = None, display_steps: int = 5,
+                 show_title: bool = True, show_value: bool = True, position: ICWidgetPosition = ICWidgetPosition.Top, widget_id: int = 0, *args, **kwargs):
+
+        if (not show_value) and (not show_value):
+            cont_type = ICLinearContainerType.BAR_NO_TITLE_NO_VALUE
+        elif not show_value:
+            cont_type = ICLinearContainerType.BAR_NO_VALUE
+        elif not show_title:
+            cont_type = ICLinearContainerType.BAR_NO_TITLE
+        else:
+            cont_type = ICLinearContainerType.BAR
+
+        super(ICLinearSlide, self).__init__(cont_type, widget_id, *args, **kwargs)
 
         # setup the local variables
         self._name: str = name
 
         # the slider bar
-        self.slider = ICSlider(values, current_value, displayed_values, orient, widget_id)
+        self.slider: ICSlider = ICSlider(values, current_value, position, widget_id)
+        self.slider.changed.connect(self.value_changed)
+        self.add_central_widget(self.slider)
 
-        # title and value text color
-        self._title_color: QtGui.QColor = ICDisplayConfig.HeaderTextColor
-        self._value_color: QtGui.QColor = ICDisplayConfig.ValueTextColor
+        # initialise the local variables
+        self.title = name
+        self.value = current_value
+        self.unit = unit
 
-        # title, value and unit text size
-        self._title_size: int = ICDisplayConfig.LabelTextSize
-        self._value_size: int = ICDisplayConfig.LabelTextSize
+        # number of steps for drawing ticks in the gauge bar
+        self._display_steps: int = display_steps
 
-        # layout the widget
-        layout = QtWidgets.QVBoxLayout()
+        # selected values and displayed values for the scale
+        self._scale_values: list[float] = values
+        self._scale_displayed_values: list[str] = displayed_values
 
-        # add the top title
-        self._title_top = QtWidgets.QLabel("", self)
-        self._title_top.setStyleSheet("QLabel { background-color : " +
-                                      ICDisplayConfig.QtColorToSting(self.background_color) + "; color : " +
-                                      ICDisplayConfig.QtColorToSting(self._title_color) + ";}")
-        self._title_top.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self._title_top)
+        # create the display lists
+        axis_scale_values, axis_scale_displayed_values = ICLinearAxis.select_ticks(values, displayed_values, display_steps)
 
-        # add the slider
-        layout.addWidget(self.slider)
+        # add the scale bar
+        self.add_first_scale_bar(name, axis_scale_values, axis_scale_displayed_values, ICWidgetPosition.opposite(position))
 
-        # add the bottom layout
-        hb_layout = QtWidgets.QHBoxLayout()
-
-        # add the bottom title
-        self._title_bot = QtWidgets.QLabel("", self)
-        self._title_bot.setStyleSheet("QLabel { background-color : " +
-                                      ICDisplayConfig.QtColorToSting(self.background_color) + "; color : " +
-                                      ICDisplayConfig.QtColorToSting(self._title_color) + ";}")
-        self._title_bot.setAlignment(Qt.AlignCenter)
-        hb_layout.addWidget(self._title_bot)
-
-        # add the value
-        self._value = QtWidgets.QLabel("", self)
-        self._value.setStyleSheet("QLabel { background-color : " +
-                                  ICDisplayConfig.QtColorToSting(self.background_color) + "; color : " +
-                                  ICDisplayConfig.QtColorToSting(self._value_color) + "; border-radius : 5px; }")
-        self._value.setAlignment(Qt.AlignCenter)
-        hb_layout.addWidget(self._value)
-
-        # add the layout
-        layout.addLayout(hb_layout)
-        self.setLayout(layout)
-
-        # fixed gauge width
-        self._gauge_width_limit: int = ICDisplayConfig.LinearGaugeVerticalWidth         # for vertical slider
-        self._gauge_height_limit: int = ICDisplayConfig.LinearGaugeHorizontalHeight     # for horizontal slider
-
-        # set the orientation
-        self.orientation = orient
-
-        # set basic behaviour
-        self.focusable = False
-        self.clickable = False
+        self.vertical_gauge_width = ICDisplayConfig.LinearGaugeVerticalMaxWidth
+        self.horizontal_gauge_height = ICDisplayConfig.LinearGaugeHorizontalMaxHeight
 
         # override the base Size policy
-        self.setSizePolicy(
-            QtWidgets.QSizePolicy.MinimumExpanding,
-            QtWidgets.QSizePolicy.MinimumExpanding
-        )
+        self.setSizePolicy(QtWidgets.QSizePolicy.MinimumExpanding, QtWidgets.QSizePolicy.MinimumExpanding)
 
-        # connect value changed event from slider
-        self.slider.changed.connect(self.value_changed)
-
-        # update the display
-        self._local_update()
+        # call layout update to specify size
+        self.on_layout_update()
 
     ########################################################
     # properties
     ########################################################
-    # get the gauge title
     @property
-    def name(self) -> str:
-        return self._name
+    def scale_values(self) -> list[float]:
+        return self._scale_values
 
-    # set the gauge title
-    @name.setter
-    def name(self, nm: str) -> None:
-        self._name = nm
-        self._title_update()
-
-    # get the slider value
     @property
-    def value(self) -> float:
-        return self.slider.current_value
-
-    # set the slider value
-    @value.setter
-    def value(self, ft: float) -> None:
-        if self.slider.current_value == ft:
-            return
-        self.slider.current_value = ft
-        self._value_update()
-
-    # get the color of the title
-    @property
-    def title_text_color(self) -> QtGui.QColor:
-        return self._title_color
-
-    # set the title color
-    @title_text_color.setter
-    def title_text_color(self, clr: QtGui.QColor) -> None:
-        self._title_color = clr
-        self._title_top.setStyleSheet("QLabel { background-color : " +
-                                      ICDisplayConfig.QtColorToSting(self.background_color) + "; color : " +
-                                      ICDisplayConfig.QtColorToSting(self._title_color) + ";}")
-        self._title_bot.setStyleSheet("QLabel { background-color : " +
-                                      ICDisplayConfig.QtColorToSting(self.background_color) + "; color : " +
-                                      ICDisplayConfig.QtColorToSting(self._title_color) + ";}")
-        self._title_update()
-
-    # get the color of the title
-    @property
-    def value_text_color(self) -> QtGui.QColor:
-        return self._value_color
-
-    # set the title color
-    @value_text_color.setter
-    def value_text_color(self, clr: QtGui.QColor) -> None:
-        self._value_color = clr
-        self._value_bot.setStyleSheet("QLabel { background-color : " +
-                                      ICDisplayConfig.QtColorToSting(self.background_color) + "; color : " +
-                                      ICDisplayConfig.QtColorToSting(self._value_color) + "; border-radius : 5px; }")
-        self._value_update()
-
-    # get the size of the title text
-    @property
-    def title_size(self) -> int:
-        return self._title_size
-
-    # set the size of the title text
-    @title_size.setter
-    def title_size(self, sz: int) -> None:
-        self._title_size = sz
-        self._title_update()
-
-    # get the size of the value text
-    @property
-    def value_size(self) -> int:
-        return self._value_size
-
-    # set the size of the title text
-    @value_size.setter
-    def value_size(self, sz: int) -> None:
-        self._value_size = sz
-        self._value_update()
-
-    # get the maximum width of the vertical gauge
-    @property
-    def vertical_gauge_width(self) -> int:
-        return self._gauge_width_limit
-
-    # set the maximum width of the vertical gauge
-    @vertical_gauge_width.setter
-    def vertical_gauge_width(self, wd: int) -> None:
-        self._gauge_width_limit = wd
-        self.on_orientation_changed()
-        self._local_update()
-
-    # get the maximum height of the horizontal gauge
-    @property
-    def horizontal_gauge_height(self) -> int:
-        return self._gauge_height_limit
-
-    # set the maximum height of the horizontal gauge
-    @horizontal_gauge_height.setter
-    def horizontal_gauge_height(self, ht: int) -> None:
-        self._gauge_height_limit = ht
-        self.on_orientation_changed()
-        self._local_update()
+    def scale_displayed_values(self) -> list[str]:
+        return self._scale_displayed_values
 
     ########################################################
     # functions
     ########################################################
-    # update title
-    def _title_update(self):
-        # nothing to do if hidden
-        if self.state == ICWidgetState.Hidden:
-            return
-
-        # orientation determines which label to update
-        if self.orientation == ICWidgetOrientation.Vertical:
-            selected_title = self._title_top
-        else:
-            selected_title = self._title_bot
-
-        # update the text based on the state
-        if self.state in (ICWidgetState.Transparent, ICWidgetState.FrameOnly):
-            selected_title.setText("<span style='font-size:" + "{}".format(self._title_size) + "pt;'>" +
-                                   "</span>")
-        else:
-            selected_title.setText("<span style='font-size:" + "{}".format(self._title_size) + "pt;'>" +
-                                   self._name + "</span>")
-        # update the title
-        selected_title.update()
-
-    # update value
-    def _value_update(self):
-        # nothing to do if hidden
-        if self.state == ICWidgetState.Hidden:
-            return
-
-        # update the value based on widget visibility state
-        if self.state in (ICWidgetState.Transparent, ICWidgetState.FrameOnly):
-            # set background color and do not draw
-            self._value.setText("<span style='font-size:" + "{}".format(self._value_size) + "pt;'>" +
-                                "</span>")
-        else:
-            # update the value text
-            self._value.setText("<span style='font-size:" + "{}".format(self._value_size) + "pt;'>" +
-                                "{:.2f}".format(self.slider.current_value) + "</span>")
-        # update the label
-        self._value.update()
-
-    # update the widget
-    def _local_update(self):
-        # update the title text
-        self._title_update()
-        # update the value text
-        self._value_update()
-        # update the slider
-        self.slider.update()
-        # update self
-        self.update()
+    # override the default paint event
+    def showEvent(self, e):
+        self.on_layout_update()
 
     ########################################################
     # base class event overrides
     ########################################################
     # change layout based on the orientation
-    def on_orientation_changed(self) -> None:
-        self.slider.orientation = self.orientation
-        if self.orientation == ICWidgetOrientation.Horizontal:
-            self.size_hint = (ICDisplayConfig.LinearSlideWidth, ICDisplayConfig.LinearSlideHeight)
-            self.setMaximumSize(10000, self.horizontal_gauge_height)
-            self._title_top.hide()
-            self._title_top.setMaximumSize(0, 0)
-            self._title_bot.show()
-            self._title_bot.setMaximumSize(10000, 10000)
+    def on_layout_update(self) -> None:
+        if self.scale_bar_one is not None:
+            scale_width = self.scale_bar_one.estimate_max_scale_width()
+
+        if self.position.is_horizontal():
+            self.size_hint = (ICDisplayConfig.LinearGaugeHorizontalWidth, ICDisplayConfig.LinearGaugeHorizontalMaxHeight)
+            if self.scale_bar_one is not None:
+                gauge_width = ICDisplayConfig.LinearGaugeHorizontalMaxHeight - scale_width
+            else:
+                gauge_width = ICDisplayConfig.LinearGaugeHorizontalMaxHeight
+            self.slider.size_hint = (ICDisplayConfig.LinearGaugeHorizontalWidth, gauge_width)
+            if self.scale_bar_one is not None:
+                self.scale_bar_one.size_hint = (ICDisplayConfig.LinearGaugeHorizontalWidth, scale_width)
+
         else:
-            self.size_hint = (ICDisplayConfig.LinearSlideHeight, ICDisplayConfig.LinearSlideWidth)
-            self.setMaximumSize(self.vertical_gauge_width, 10000)
-            self._title_bot.hide()
-            self._title_bot.setMaximumSize(0, 0)
-            self._title_top.show()
-            self._title_top.setMaximumSize(10000, 10000)
-        self._local_update()
+            self.size_hint = (ICDisplayConfig.LinearGaugeVerticalMaxWidth, ICDisplayConfig.LinearGaugeVerticalHeight)
+            if self.scale_bar_one is not None:
+                gauge_width = ICDisplayConfig.LinearGaugeVerticalMaxWidth - scale_width
+            else:
+                gauge_width = ICDisplayConfig.LinearGaugeVerticalMaxWidth
+            self.slider.size_hint = (gauge_width, ICDisplayConfig.LinearGaugeVerticalHeight)
+            if self.scale_bar_one is not None:
+                self.scale_bar_one.size_hint = (scale_width, ICDisplayConfig.LinearGaugeVerticalHeight)
 
-    # change the visibility of elements
-    def on_state_changed(self) -> None:
-        if self.state == ICWidgetState.Hidden:
-            # hide both the title labels
-            self._title_bot.hide()
-            self._title_bot.setMaximumSize(0, 0)
-            self._title_top.hide()
-            self._title_top.setMaximumSize(0, 0)
+    def on_value_update(self, value: float) -> None:
+        self.slider.current_value = value
 
-            # hide the value label
-            self._value.hide()
-            self._value.setMaximumSize(0, 0)
+    ########################################################
+    # functions
+    ########################################################
 
-            # hide the slider
-            self.slider.state = ICWidgetState.Hidden
-            self.slider.update()
-
-            # hide self
-            self.hide()
-            self.update()
-        else:
-            # all other states are managed in the display update routines
-            # show self
-            self.show()
-
-            # show the value display
-            self._value.show()
-            self._value.setMaximumSize(10000, 10000)
-
-            # show the title based on the orientation
-            self.on_orientation_changed()
-
-            # set the gauge bar state
-            self.slider.state = self.state
-            self._local_update()
+    ########################################################
+    # base class event overrides
+    ########################################################
 
     ########################################################
     # slots
     ########################################################
-    @pyqtSlot(float)
+    # @pyqtSlot(float)
     def value_changed(self, val: float) -> None:
-        self._value_update()
+        self.value = val
+
+
+class ICLinearSlideDialog(ICConfigDialogTemplate):
+    """
+        A helper dialog class to for linear slide
+    """
+
+    def __init__(self, name: str, unit: str, values: list[float], current_value: float, displayed_values: list[str] = None, display_steps: int = 5,
+                 show_title: bool = True, show_value: bool = True, position: ICWidgetPosition = ICWidgetPosition.Top, widget_id: int = 0, *args, **kwargs):
+        super(ICLinearSlideDialog, self).__init__(*args, **kwargs)
+
+        # gauge colors normal
+        self._gauge_color_normal_light: QtGui.QColor = ICDisplayConfig.LinearGaugeNormalLight
+        self._gauge_color_normal_dark: QtGui.QColor = ICDisplayConfig.LinearGaugeNormalDark
+
+        # gauge colors alarmed
+        self._gauge_color_alarm_light: QtGui.QColor = ICDisplayConfig.LinearGaugeErrorLight
+        self._gauge_color_alarm_dark: QtGui.QColor = ICDisplayConfig.LinearGaugeErrorDark
+
+        layout = QtWidgets.QVBoxLayout()
+
+        self._linear_slide: ICLinearSlide = ICLinearSlide(name, unit, values, current_value, displayed_values, display_steps,
+                                                          show_title, show_value, position, widget_id)
+        layout.addWidget(self._linear_slide)
+
+        layout.addLayout(self.generate_ok_cancel_buttons())
+
+        self.setLayout(layout)
+
+    ########################################
+    # property
+    ########################################
+    @property
+    def linear_slide(self) -> ICLinearSlide:
+        return self._linear_slide
+
+        # get the normal gauge color
+
+    @property
+    def gauge_color_normal(self) -> tuple[QtGui.QColor, QtGui.QColor]:
+        return self._gauge_color_normal_light, self._gauge_color_normal_dark
+
+    # set the normal gauge color
+    @gauge_color_normal.setter
+    def gauge_color_normal(self, clr: tuple[QtGui.QColor, QtGui.QColor]) -> None:
+        self._gauge_color_normal_light = clr[0]
+        self._gauge_color_normal_dark = clr[1]
+
+    # get the alarm gauge color
+    @property
+    def gauge_color_alarm(self) -> tuple[QtGui.QColor, QtGui.QColor]:
+        return self._gauge_color_alarm_light, self._gauge_color_alarm_dark
+
+    # set the normal gauge color
+    @gauge_color_alarm.setter
+    def gauge_color_alarm(self, clr: tuple[QtGui.QColor, QtGui.QColor]) -> None:
+        self._gauge_color_alarm_light = clr[0]
+        self._gauge_color_alarm_dark = clr[1]
+
+    ####################################
+    # Callback functions
+    ####################################
+    # called when ok is clicked
+    def on_ok_clicked(self) -> None:
+        # selected values
+        self._value = self._linear_slide.value
+        # selected display value
+        index = self._linear_slide.scale_values.index(self._value)
+        self._display_value = self._linear_slide.scale_displayed_values[index]
+
+    # draw the ring
+    def draw_additional(self, painter: QtGui.QPainter, width: int, height: int, keep_out_width: int, keep_out_height: int) -> None:
+        # create the gradient
+        half_height = 0.5 * height
+        half_width = 0.5 * width
+
+        # setup the brush
+        gradient = QtGui.QConicalGradient(half_width, half_height, 90)
+
+        if self._linear_slide.slider.alarm_activated:
+            gradient.setColorAt(0, self._gauge_color_alarm_light)
+            gradient.setColorAt(1, self._gauge_color_alarm_dark)
+        else:
+            gradient.setColorAt(0, self._gauge_color_normal_light)
+            gradient.setColorAt(1, self._gauge_color_normal_dark)
+
+        painter.setBrush(gradient)
+
+        # setup the pen
+        pen = QtGui.QPen()
+        pen.setBrush(gradient)
+        painter.setPen(pen)
+
+        # calculate the path
+        path = QtGui.QPainterPath()
+        path.setFillRule(Qt.OddEvenFill)
+        theta = 360 * (self._linear_slide.value - self._linear_slide.slider.values[0]) / \
+                (self._linear_slide.slider.values[-1] - self._linear_slide.slider.values[0])
+
+        # smaller radius
+        box_length = sqrt(2) * (max(keep_out_width, keep_out_height))
+        half_box_length = box_length / 2
+        rect = QtCore.QRectF(half_width - half_box_length, half_height - half_box_length, box_length, box_length)
+        path.moveTo(half_width, half_height - half_box_length)
+        path.arcTo(rect, 90, -theta)
+        pos = path.currentPosition()
+
+        # bigger radius
+        bigger_box_half_length = min(half_width, half_height) - 10
+        rect_big = QtCore.QRectF(half_width - bigger_box_half_length, half_height - bigger_box_half_length,
+                                 2 * bigger_box_half_length, 2 * bigger_box_half_length)
+        new_x = half_width + (pos.x() - half_width) * bigger_box_half_length / half_box_length
+        new_y = half_height + (pos.y() - half_height) * bigger_box_half_length / half_box_length
+        path.lineTo(new_x, new_y)
+        path.arcTo(rect_big, 90 - theta, theta)
+        path.closeSubpath()
+
+        # paint the gauge
+        painter.drawPath(path)
+
