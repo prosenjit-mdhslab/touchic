@@ -12,8 +12,8 @@ from enum import Enum, Flag
 from collections import deque
 from weakref import WeakValueDictionary
 from datetime import datetime, timedelta
-from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtCore import Qt
+from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6.QtCore import Qt
 from .display_config import ICDisplayConfig
 
 
@@ -50,10 +50,10 @@ class ICWidgetPosition(Flag):
             return cls.Right
 
     def is_horizontal(self) -> bool:
-        return self in ICWidgetPosition.Bottom | ICWidgetPosition.Top
+        return ICWidgetPosition.Bottom in self or ICWidgetPosition.Top in self
 
     def is_vertical(self) -> bool:
-        return self in ICWidgetPosition.Right | ICWidgetPosition.Left
+        return ICWidgetPosition.Right in self or ICWidgetPosition.Left in self
 
 
 class ICWidgetHistory:

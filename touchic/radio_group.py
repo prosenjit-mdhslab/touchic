@@ -7,8 +7,8 @@ Created on Sat Apr  4 17:00:17 2020
 TODO: popup dialog
 """
 
-from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtCore import Qt, pyqtSlot, pyqtSignal
+from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6.QtCore import Qt, pyqtSlot, pyqtSignal
 from enum import Enum
 from typing import Union
 from .base_widget import ICBaseWidget, ICWidgetState

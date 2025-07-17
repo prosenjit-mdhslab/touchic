@@ -7,8 +7,8 @@ Created on May 23 2021
 A button to input different kind of data
 """
 
-from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6.QtCore import Qt, pyqtSignal
 from typing import Union
 from .display_config import ICDisplayConfig
 from .base_widget import ICBaseWidget, ICWidgetState

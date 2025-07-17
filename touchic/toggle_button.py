@@ -8,8 +8,8 @@ This file implements a toggle button
 """
 
 from enum import Enum
-from PyQt5 import QtCore, QtGui
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt6 import QtCore, QtGui
+from PyQt6.QtCore import Qt, pyqtSignal
 from .base_widget import ICWidgetState, ICWidgetPosition
 from .basic_button import ICBasicButton
 from .display_config import ICDisplayConfig

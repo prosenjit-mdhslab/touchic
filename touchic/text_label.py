@@ -8,8 +8,8 @@ This displays a name value pair for a parameter.
 # TODO: clickable & focusable button will allow a popup of a graph showing its history
 """
 
-from PyQt5 import QtCore, QtGui
-from PyQt5.QtCore import Qt, QTimer, pyqtSlot
+from PyQt6 import QtCore, QtGui
+from PyQt6.QtCore import Qt, QTimer, pyqtSlot
 from typing import Union
 from enum import Enum
 from datetime import datetime

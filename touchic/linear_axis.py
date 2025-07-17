@@ -7,8 +7,8 @@ Created on May 24 2021
 A linear axis for use with different widgets
 """
 
-from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtCore import Qt
+from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6.QtCore import Qt
 from enum import Enum
 from typing import Union
 from .display_config import ICDisplayConfig

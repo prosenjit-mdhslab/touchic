@@ -8,8 +8,8 @@ Custom Qt Widget to show a linear gauge with min-max. The following modifiable
 attributes are exposed.
 """
 
-from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtCore import Qt, pyqtSlot, pyqtSignal
+from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6.QtCore import Qt, pyqtSlot, pyqtSignal
 from typing import Union
 from .display_config import ICDisplayConfig
 from .base_widget import ICBaseWidget, ICWidgetState, ICWidgetPosition

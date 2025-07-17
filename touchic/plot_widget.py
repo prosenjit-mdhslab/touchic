@@ -6,8 +6,8 @@ Created on May 23 2021
 
 A class to plot 2D data
 """
-from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
+from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
 from typing import Union
 import numpy as np
 from .display_config import ICDisplayConfig

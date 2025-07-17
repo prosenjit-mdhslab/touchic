@@ -8,8 +8,8 @@ A linear slider to graphically enter data
 TODO: Popup dialog
 """
 
-from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6.QtCore import Qt, pyqtSignal
 from typing import Union
 from math import sqrt
 from .display_config import ICDisplayConfig

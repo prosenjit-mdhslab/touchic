@@ -7,8 +7,8 @@ Created on May 18 2021
 This is a simple basic button
 """
 
-from PyQt5 import QtCore, QtGui
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt6 import QtCore, QtGui
+from PyQt6.QtCore import Qt, pyqtSignal
 from .display_config import ICDisplayConfig
 from .base_widget import ICBaseWidget, ICWidgetState
 

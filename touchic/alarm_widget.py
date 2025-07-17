@@ -7,8 +7,8 @@ Created on May 22 2021
 Custom Qt Widget to show alarm message.
 """
 
-from PyQt5 import QtGui, QtWidgets
-from PyQt5.QtCore import Qt, pyqtSlot, pyqtSignal
+from PyQt6 import QtGui, QtWidgets
+from PyQt6.QtCore import Qt, pyqtSlot, pyqtSignal
 from datetime import datetime
 from enum import Enum
 from .display_config import ICDisplayConfig

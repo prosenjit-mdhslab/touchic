@@ -6,8 +6,8 @@ Created on May 23 2021
 
 A class to input alpha numeric data
 """
-from PyQt5 import QtWidgets
-from PyQt5.QtCore import Qt
+from PyQt6 import QtWidgets
+from PyQt6.QtCore import Qt
 from typing import Union
 from .display_config import ICDisplayConfig
 from .base_widget import ICBaseWidget, ICWidgetState

@@ -9,7 +9,7 @@ rendering the controls.  These can be overridden by changing them at the object 
 
 TODO: Implement local color class
 """
-from PyQt5 import QtGui
+from PyQt6 import QtGui
 
 
 class ICDisplayConfig:

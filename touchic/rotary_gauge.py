@@ -8,8 +8,8 @@ This displays a name value pair for a parameter.
 # TODO: clickable & focusable button will allow a popup of a graph showing its history
 """
 
-from PyQt5 import QtCore, QtGui
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6 import QtCore, QtGui
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from typing import Union
 from math import sqrt
 from .display_config import ICDisplayConfig
